@@ -1,1421 +1,567 @@
-<!DOCTYPE html>
-<html lang="id">
-<head>
-<meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
-<meta name="theme-color" content="#0A192F"/>
-<meta name="description" content="The Great Voyage — Seafarer Wealth Navigator. Navigate toward financial freedom."/>
-<meta name="apple-mobile-web-app-capable" content="yes"/>
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
-<title>The Great Voyage v3.0</title>
-<link rel="manifest" href="manifest.json"/>
-<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚓</text></svg>"/>
-<link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin/>
-<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,400;0,700;0,900;1,400&family=JetBrains+Mono:wght@400;600;700&family=Lato:wght@300;400;700;900&display=swap" rel="stylesheet"/>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+import { useState, useCallback, useRef } from "react";
+import * as XLSX from "xlsx";
+import {
+  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
+} from "recharts";
+import { Anchor, AlertTriangle, Download, Upload, Wind, Compass } from "lucide-react";
 
-<style>
-:root {
-  --navy:     #0A192F;
-  --navy2:    #0D2137;
-  --card:     #0F2744;
-  --card2:    #132236;
-  --border:   #1A3A5A;
-  --gold:     #C5A059;
-  --gold-l:   #E8C97A;
-  --gold-d:   #8A6A30;
-  --teal:     #2DD4BF;
-  --green:    #22C55E;
-  --purple:   #A78BFA;
-  --pink:     #F472B6;
-  --red:      #EF4444;
-  --muted:    #4A7A9B;
-  --muted2:   #2A5A7A;
-  --text:     #C8D8E8;
-  --white:    #F0F4F8;
-  --radius:   14px;
-  --radius-sm:8px;
-}
-*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
-html{scroll-behavior:smooth}
-body{background:var(--navy);color:var(--text);font-family:'Lato',sans-serif;min-height:100vh;overflow-x:hidden}
+// ─── CONSTANTS ────────────────────────────────────────────────────────────────
+const NAVY = "#0A192F";
+const NAVY2 = "#0D2137";
+const GOLD = "#C5A059";
+const GOLD_LIGHT = "#E8C97A";
+const TEAL = "#2DD4BF";
+const RED = "#EF4444";
+const GREEN = "#22C55E";
 
-/* ── STARFIELD ── */
-#starfield{position:fixed;inset:0;pointer-events:none;z-index:0;overflow:hidden}
-.star{position:absolute;border-radius:50%;background:#fff;animation:twinkle var(--d,3s) ease-in-out infinite var(--delay,0s)}
-@keyframes twinkle{0%,100%{opacity:var(--min-op,.1)}50%{opacity:var(--max-op,.8)}}
+const REQUIRED_FUEL_COLS = ["Bulan_On", "Bulan_Off", "Gaji_Laut", "Biaya_Laut", "Biaya_Darat"];
+const REQUIRED_PARTS_COLS = ["Nama_Aset", "Alokasi_Persen", "Return_Persen"];
+const REQUIRED_TARGET_COLS = ["Target_Passive_Income"];
 
-/* ── OCEAN WAVES (bottom ambient) ── */
-#ocean-ambient{position:fixed;bottom:0;left:0;right:0;height:180px;pointer-events:none;z-index:0;overflow:hidden}
-.wave-path{position:absolute;bottom:0;left:-50%;width:200%;height:100%;opacity:.06}
-.wave-path svg{width:100%;height:100%}
+// ─── TEMPLATE GENERATOR ──────────────────────────────────────────────────────
+function downloadTemplate() {
+  const wb = XLSX.utils.book_new();
 
-/* ── APP SHELL ── */
-#app{position:relative;z-index:1}
+  const fuelData = [
+    { Bulan_On: 8, Bulan_Off: 4, Gaji_Laut: 3000, Biaya_Laut: 500, Biaya_Darat: 800 }
+  ];
+  const partsData = [
+    { Nama_Aset: "Saham Dividen", Alokasi_Persen: 40, Return_Persen: 8 },
+    { Nama_Aset: "Obligasi/Sukuk", Alokasi_Persen: 30, Return_Persen: 6 },
+    { Nama_Aset: "REITs", Alokasi_Persen: 20, Return_Persen: 7 },
+    { Nama_Aset: "Deposito", Alokasi_Persen: 10, Return_Persen: 5 }
+  ];
+  const targetData = [{ Target_Passive_Income: 2000 }];
 
-/* ══════════════════════════════════════════════════
-   CURRENCY SELECTOR (landing)
-══════════════════════════════════════════════════ */
-#currency-selector{
-  min-height:100vh;
-  display:flex;flex-direction:column;align-items:center;justify-content:center;
-  padding:40px 20px;text-align:center;animation:fadeUp .8s ease
-}
-.hero-anchor{font-size:72px;filter:drop-shadow(0 0 32px rgba(197,160,89,.6));animation:float 5s ease-in-out infinite;margin-bottom:20px}
-@keyframes float{0%,100%{transform:translateY(0) rotate(-3deg)}50%{transform:translateY(-14px) rotate(3deg)}}
-.hero-title{font-family:'Playfair Display',serif;font-size:clamp(32px,6vw,58px);font-weight:900;color:var(--gold-l);letter-spacing:.04em;text-shadow:0 0 60px rgba(197,160,89,.35);line-height:1.1;margin-bottom:6px}
-.hero-version{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);letter-spacing:.2em;margin-bottom:10px}
-.hero-sub{color:var(--muted);font-size:15px;max-width:440px;line-height:1.8;margin-bottom:52px}
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(fuelData), "Fueling");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(partsData), "VesselParts");
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(targetData), "Target");
 
-.currency-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;width:100%;max-width:560px;margin-bottom:40px}
-.currency-card{
-  background:rgba(15,39,68,.7);border:1px solid var(--border);border-radius:var(--radius);
-  padding:28px 16px;cursor:pointer;transition:all .3s;position:relative;overflow:hidden;backdrop-filter:blur(8px)
-}
-.currency-card::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at 50% 0%,rgba(197,160,89,.1) 0%,transparent 60%);opacity:0;transition:opacity .3s}
-.currency-card:hover{border-color:var(--gold);transform:translateY(-4px);box-shadow:0 20px 40px rgba(0,0,0,.4),0 0 30px rgba(197,160,89,.15)}
-.currency-card:hover::before{opacity:1}
-.currency-card.active{border-color:var(--gold);background:rgba(197,160,89,.08);box-shadow:0 0 30px rgba(197,160,89,.2)}
-.cc-flag{font-size:36px;display:block;margin-bottom:10px}
-.cc-symbol{font-family:'Playfair Display',serif;font-size:28px;font-weight:700;color:var(--gold-l);display:block;margin-bottom:4px}
-.cc-name{font-size:13px;color:var(--text);font-weight:700;display:block;margin-bottom:2px}
-.cc-lang{font-size:10px;color:var(--muted);letter-spacing:.1em}
-
-/* ══════════════════════════════════════════════════
-   CINEMATIC LOADING SCREEN
-══════════════════════════════════════════════════ */
-#loading-screen{
-  display:none;position:fixed;inset:0;z-index:9999;
-  background:radial-gradient(ellipse at 30% 40%,#0D2137 0%,#0A192F 60%,#050E1A 100%);
-  flex-direction:column;align-items:center;justify-content:center;text-align:center
-}
-#loading-screen.active{display:flex}
-.loading-ship{font-size:64px;animation:shipSway 2s ease-in-out infinite;filter:drop-shadow(0 0 30px rgba(197,160,89,.5));margin-bottom:32px}
-@keyframes shipSway{0%,100%{transform:translateY(0) rotate(-4deg)}50%{transform:translateY(-16px) rotate(4deg)}}
-.loading-title{font-family:'Playfair Display',serif;font-size:clamp(22px,4vw,36px);color:var(--gold-l);margin-bottom:8px;text-shadow:0 0 30px rgba(197,160,89,.4)}
-.loading-step{font-family:'JetBrains Mono',monospace;font-size:13px;color:var(--teal);min-height:22px;letter-spacing:.05em;transition:opacity .4s}
-.loading-bar-wrap{width:280px;height:3px;background:var(--border);border-radius:2px;margin:24px auto 0;overflow:hidden}
-.loading-bar{height:100%;width:0%;background:linear-gradient(90deg,var(--gold-d),var(--gold-l),var(--teal));border-radius:2px;transition:width .5s ease;box-shadow:0 0 12px rgba(197,160,89,.5)}
-.loading-dots{display:flex;gap:8px;justify-content:center;margin-top:24px}
-.loading-dot{width:6px;height:6px;border-radius:50%;background:var(--gold);opacity:.3;animation:dotPulse 1.4s ease-in-out infinite}
-.loading-dot:nth-child(2){animation-delay:.2s}
-.loading-dot:nth-child(3){animation-delay:.4s}
-@keyframes dotPulse{0%,100%{opacity:.2;transform:scale(.8)}50%{opacity:1;transform:scale(1.2)}}
-
-/* ══════════════════════════════════════════════════
-   UPLOAD STATE
-══════════════════════════════════════════════════ */
-#upload-state{display:none;min-height:100vh;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;text-align:center;animation:fadeUp .6s ease}
-#upload-state.active{display:flex}
-.upload-area-title{font-family:'Playfair Display',serif;font-size:clamp(22px,4vw,38px);color:var(--gold-l);margin-bottom:6px}
-.upload-area-sub{color:var(--muted);font-size:14px;margin-bottom:40px}
-.currency-badge{display:inline-flex;align-items:center;gap:8px;background:rgba(197,160,89,.1);border:1px solid rgba(197,160,89,.3);border-radius:20px;padding:6px 16px;font-size:13px;color:var(--gold);margin-bottom:24px}
-#drop-zone{
-  width:100%;max-width:460px;border:2px dashed rgba(197,160,89,.3);border-radius:18px;padding:56px 32px;
-  cursor:pointer;background:rgba(13,33,55,.6);backdrop-filter:blur(8px);transition:all .3s;position:relative;overflow:hidden
-}
-#drop-zone.drag-over{border-color:var(--gold);box-shadow:0 0 50px rgba(197,160,89,.2);background:rgba(197,160,89,.05)}
-.upload-icon-wrap{font-size:48px;display:block;margin:0 auto 16px;filter:drop-shadow(0 0 16px rgba(45,212,191,.4))}
-.drop-main{color:var(--text);font-size:15px;margin-bottom:6px}
-.drop-sub{color:var(--muted);font-family:'JetBrains Mono',monospace;font-size:11px}
-.dz-wave{position:absolute;bottom:0;left:-100%;right:-100%;height:2px;background:linear-gradient(90deg,transparent,var(--teal),transparent);animation:dzWave 3s ease-in-out infinite;opacity:.5}
-@keyframes dzWave{0%{transform:translateX(-50%)}100%{transform:translateX(50%)}}
-.btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:28px}
-.btn-ghost{display:inline-flex;align-items:center;gap:8px;background:transparent;border:1px solid rgba(197,160,89,.45);color:var(--gold);padding:11px 24px;border-radius:8px;cursor:pointer;font-size:13px;font-family:'Lato',sans-serif;letter-spacing:.05em;transition:all .2s;text-decoration:none}
-.btn-ghost:hover{background:rgba(197,160,89,.1);border-color:var(--gold);box-shadow:0 0 20px rgba(197,160,89,.15)}
-.btn-secondary{border-color:var(--border);color:var(--muted)}
-.btn-secondary:hover{border-color:var(--muted);color:var(--text)}
-.error-banner{margin-top:20px;padding:14px 20px;border-radius:10px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.4);display:none;align-items:flex-start;gap:10px;max-width:460px;width:100%;text-align:left}
-.error-banner.show{display:flex}
-.error-banner p{color:#FCA5A5;font-size:13px;line-height:1.6}
-
-/* ══════════════════════════════════════════════════
-   DASHBOARD
-══════════════════════════════════════════════════ */
-#dashboard{display:none;max-width:1100px;margin:0 auto;padding:28px 16px 100px;animation:fadeUp .6s ease}
-#dashboard.active{display:block}
-@keyframes fadeUp{from{opacity:0;transform:translateY(20px)}to{opacity:1;transform:none}}
-
-/* Topbar */
-.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:32px;flex-wrap:wrap;gap:12px}
-.topbar-left{}
-.topbar-file{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:.12em;margin-bottom:4px}
-.topbar-title{font-family:'Playfair Display',serif;font-size:clamp(20px,3.5vw,32px);color:var(--gold-l);text-shadow:0 0 24px rgba(197,160,89,.3)}
-.topbar-right{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
-.btn-sm{background:transparent;border:1px solid var(--border);color:var(--muted);padding:8px 16px;border-radius:8px;cursor:pointer;font-size:12px;font-family:'Lato',sans-serif;transition:all .2s}
-.btn-sm:hover{border-color:var(--gold);color:var(--gold)}
-.inflation-badge{display:flex;align-items:center;gap:6px;background:rgba(239,68,68,.1);border:1px solid rgba(239,68,68,.3);border-radius:20px;padding:5px 12px;font-size:11px;color:#FCA5A5;font-family:'JetBrains Mono',monospace}
-
-/* Grid */
-.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px}
-.grid-3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px}
-.grid-4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px}
-@media(max-width:760px){.grid-2{grid-template-columns:1fr}.grid-3{grid-template-columns:1fr 1fr}.grid-4{grid-template-columns:1fr 1fr}}
-@media(max-width:480px){.grid-3,.grid-4{grid-template-columns:1fr}}
-
-/* Cards */
-.card{background:rgba(13,33,55,.85);border:1px solid rgba(197,160,89,.16);border-radius:var(--radius);padding:22px;backdrop-filter:blur(6px)}
-.card-label{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
-.section-hdr{font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--gold);margin-bottom:16px}
-
-/* FIRE card */
-.fire-card{background:rgba(15,39,68,.9);border:1px solid rgba(197,160,89,.28);border-radius:var(--radius);padding:22px;position:relative;overflow:hidden}
-.fire-card::before{content:'';position:absolute;inset:0;background:radial-gradient(circle at 20% 50%,rgba(197,160,89,.07) 0%,transparent 60%);pointer-events:none}
-.fire-number{font-family:'Playfair Display',serif;font-size:clamp(28px,5vw,42px);color:var(--gold-l);line-height:1;margin:8px 0 4px;text-shadow:0 0 24px rgba(197,160,89,.4)}
-.fire-sub{color:var(--muted);font-size:13px;margin-bottom:6px}
-.fire-badge{display:inline-block;background:rgba(34,197,94,.12);border:1px solid rgba(34,197,94,.4);color:var(--green);font-size:12px;padding:4px 12px;border-radius:20px;margin-top:6px}
-.inflation-note{font-size:11px;color:#FCA5A5;margin-top:8px;font-style:italic;line-height:1.5;padding:8px 10px;background:rgba(239,68,68,.08);border-radius:6px;border-left:2px solid rgba(239,68,68,.4)}
-
-/* Metric rows */
-.metric-row{background:rgba(15,39,68,.8);border:1px solid var(--border);border-radius:10px;padding:12px 16px;display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;transition:border-color .2s}
-.metric-row:last-child{margin-bottom:0}
-.metric-row:hover{border-color:rgba(197,160,89,.3)}
-.metric-label{font-size:12px;color:var(--muted)}
-.metric-label-en{font-size:9px;color:var(--muted2);font-family:'JetBrains Mono',monospace;display:block;margin-top:1px}
-.metric-value{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:14px}
-.metric-sub{font-size:10px;font-weight:400;color:var(--muted);font-family:'Lato',sans-serif;display:block}
-
-/* Stat cards */
-.stat-card{background:rgba(13,33,55,.85);border:1px solid rgba(197,160,89,.16);border-radius:var(--radius);padding:20px;text-align:center;transition:all .2s}
-.stat-card:hover{border-color:rgba(197,160,89,.35);transform:translateY(-2px)}
-.stat-icon{font-size:24px;margin-bottom:8px;display:block}
-.stat-label{font-size:10px;text-transform:uppercase;letter-spacing:.12em;color:var(--muted);margin-bottom:2px}
-.stat-label-en{font-size:9px;color:var(--muted2);font-family:'JetBrains Mono',monospace;display:block;margin-bottom:6px}
-.stat-value{font-family:'JetBrains Mono',monospace;font-size:19px;font-weight:700;color:var(--gold-l)}
-.stat-unit{font-size:10px;color:#2A5A7A;margin-top:3px}
-
-/* Chart */
-.chart-card{background:rgba(13,33,55,.85);border:1px solid rgba(197,160,89,.16);border-radius:var(--radius);padding:24px;margin-bottom:20px;backdrop-filter:blur(6px)}
-.chart-wrap{position:relative;height:280px}
-
-/* ── ANALYTICS / TRANSPARENCY ── */
-.analytics-card{background:rgba(13,33,55,.85);border:1px solid rgba(197,160,89,.16);border-radius:var(--radius);margin-bottom:20px;overflow:hidden}
-.analytics-header{padding:18px 22px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:background .2s;user-select:none}
-.analytics-header:hover{background:rgba(197,160,89,.05)}
-.analytics-toggle{font-size:18px;color:var(--gold);transition:transform .3s}
-.analytics-toggle.open{transform:rotate(180deg)}
-.analytics-body{display:none;padding:0 22px 22px}
-.analytics-body.open{display:block}
-.analytics-section{margin-bottom:20px;padding-top:16px;border-top:1px solid var(--border)}
-.analytics-section:first-child{border-top:none;padding-top:0}
-.analytics-title{font-size:12px;color:var(--gold);letter-spacing:.1em;text-transform:uppercase;margin-bottom:10px}
-.formula-box{background:var(--navy2);border:1px solid var(--border);border-radius:8px;padding:14px;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--teal);line-height:1.8}
-.formula-comment{color:var(--muted);font-size:11px}
-
-/* Year table */
-.year-table{width:100%;border-collapse:collapse;font-size:12px}
-.year-table th{text-align:left;color:var(--muted);font-weight:400;font-size:10px;text-transform:uppercase;letter-spacing:.1em;padding:8px 10px;border-bottom:1px solid var(--border)}
-.year-table td{padding:8px 10px;border-bottom:1px solid rgba(26,58,90,.3);font-family:'JetBrains Mono',monospace}
-.year-table tr:last-child td{border-bottom:none}
-.year-table tr:hover td{background:rgba(197,160,89,.04)}
-.year-fire{color:var(--green);font-weight:700}
-.show-more-btn{background:transparent;border:1px solid var(--border);color:var(--muted);padding:8px 20px;border-radius:6px;cursor:pointer;font-size:12px;font-family:'Lato',sans-serif;margin-top:12px;transition:all .2s;display:block;width:100%}
-.show-more-btn:hover{border-color:var(--gold);color:var(--gold)}
-
-/* Vessel */
-.vessel-wrap{display:flex;flex-direction:column;align-items:center}
-.vessel-svg{width:100%;max-width:320px}
-.asset-legend-item{display:flex;justify-content:space-between;align-items:center;margin-bottom:7px}
-.asset-dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:8px;vertical-align:middle}
-
-/* Asset table */
-.asset-table{width:100%;border-collapse:collapse;font-size:13px}
-.asset-table th{text-align:left;color:var(--muted);font-weight:400;font-size:10px;text-transform:uppercase;letter-spacing:.1em;padding-bottom:10px;border-bottom:1px solid var(--border)}
-.asset-table td{padding:11px 0;border-bottom:1px solid rgba(26,58,90,.25)}
-.asset-table tr:last-child td{border-bottom:none}
-
-/* ── CHANGELOG FAB ── */
-#fab-changelog{
-  position:fixed;bottom:28px;right:28px;z-index:200;
-  width:52px;height:52px;border-radius:50%;
-  background:linear-gradient(135deg,var(--gold-d),var(--gold));
-  border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;
-  font-size:22px;box-shadow:0 4px 20px rgba(197,160,89,.4);
-  transition:all .3s;transform:scale(1)
-}
-#fab-changelog:hover{transform:scale(1.12);box-shadow:0 8px 30px rgba(197,160,89,.5)}
-#fab-changelog .fab-tooltip{position:absolute;right:60px;background:var(--card);border:1px solid var(--border);color:var(--text);font-size:12px;padding:5px 10px;border-radius:6px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .2s;font-family:'Lato',sans-serif}
-#fab-changelog:hover .fab-tooltip{opacity:1}
-
-/* Changelog modal */
-#changelog-modal{position:fixed;inset:0;z-index:300;display:none;align-items:center;justify-content:center;padding:20px}
-#changelog-modal.open{display:flex}
-.modal-backdrop{position:absolute;inset:0;background:rgba(5,14,26,.85);backdrop-filter:blur(6px)}
-.modal-box{position:relative;z-index:1;background:var(--navy2);border:1px solid rgba(197,160,89,.25);border-radius:18px;width:100%;max-width:540px;max-height:80vh;overflow:hidden;display:flex;flex-direction:column;animation:modalIn .3s ease}
-@keyframes modalIn{from{opacity:0;transform:scale(.95) translateY(10px)}to{opacity:1;transform:none}}
-.modal-hdr{padding:22px 24px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
-.modal-hdr h2{font-family:'Playfair Display',serif;color:var(--gold-l);font-size:20px}
-.modal-close{background:transparent;border:none;color:var(--muted);font-size:24px;cursor:pointer;line-height:1;transition:color .2s}
-.modal-close:hover{color:var(--text)}
-.modal-body{overflow-y:auto;padding:20px 24px;flex:1}
-.changelog-entry{margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid var(--border)}
-.changelog-entry:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
-.ch-version{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--gold);letter-spacing:.15em;margin-bottom:4px}
-.ch-date{font-size:10px;color:var(--muted);margin-bottom:8px}
-.ch-title{font-family:'Playfair Display',serif;font-size:16px;color:var(--text);margin-bottom:8px}
-.ch-items{list-style:none;display:flex;flex-direction:column;gap:5px}
-.ch-items li{font-size:12px;color:var(--muted);padding-left:16px;position:relative;line-height:1.5}
-.ch-items li::before{content:'→';position:absolute;left:0;color:var(--teal)}
-
-/* Detail modal */
-#detail-modal{position:fixed;inset:0;z-index:300;display:none;align-items:center;justify-content:center;padding:20px}
-#detail-modal.open{display:flex}
-#detail-modal .modal-box{max-width:660px}
-
-/* Inflation slider */
-.inflation-control{display:flex;align-items:center;gap:14px;background:rgba(15,39,68,.8);border:1px solid var(--border);border-radius:10px;padding:12px 16px;margin-bottom:16px}
-.inflation-control label{font-size:12px;color:var(--muted);flex-shrink:0}
-.inflation-control input[type=range]{flex:1;accent-color:var(--gold);cursor:pointer}
-.inflation-control .inf-val{font-family:'JetBrains Mono',monospace;font-size:14px;color:var(--red);font-weight:700;flex-shrink:0;min-width:36px;text-align:right}
-
-/* Tooltip */
-.tooltip-wrap{position:relative;display:inline-block}
-.tooltip-wrap .tt{position:absolute;bottom:calc(100% + 6px);left:50%;transform:translateX(-50%);background:var(--card);border:1px solid var(--border);color:var(--text);font-size:11px;padding:6px 10px;border-radius:6px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .2s;z-index:10;font-family:'Lato',sans-serif}
-.tooltip-wrap:hover .tt{opacity:1}
-
-/* Custom tooltip marker */
-.en-hint{font-family:'JetBrains Mono',monospace;font-size:9px;color:var(--muted2);display:inline-block;margin-left:4px;vertical-align:middle;letter-spacing:.05em}
-
-input[type=file]{display:none}
-
-/* Scrollbar */
-::-webkit-scrollbar{width:6px;height:6px}
-::-webkit-scrollbar-track{background:var(--navy2)}
-::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
-::-webkit-scrollbar-thumb:hover{background:var(--muted2)}
-
-.footer{text-align:center;color:#1A3A5A;font-size:10px;letter-spacing:.15em;margin-top:40px;font-family:'JetBrains Mono',monospace}
-</style>
-</head>
-<body>
-
-<!-- Starfield -->
-<div id="starfield"></div>
-<div id="ocean-ambient"></div>
-
-<div id="app">
-
-<!-- ══════════════════════════════════════════════════
-     CURRENCY SELECTOR
-══════════════════════════════════════════════════ -->
-<div id="currency-selector">
-  <div class="hero-anchor">⚓</div>
-  <div class="hero-version">VERSION 3.0 — NAVIGATOR EDITION</div>
-  <h1 class="hero-title">The Great Voyage</h1>
-  <p class="hero-sub">Pilih mata uang & bahasa untuk memulai pelayaran menuju kebebasan finansial.</p>
-  <div class="currency-grid">
-    <div class="currency-card" onclick="selectCurrency('IDR')">
-      <span class="cc-flag">🇮🇩</span>
-      <span class="cc-symbol">Rp</span>
-      <span class="cc-name">Rupiah</span>
-      <span class="cc-lang">BAHASA INDONESIA</span>
-    </div>
-    <div class="currency-card" onclick="selectCurrency('PHP')">
-      <span class="cc-flag">🇵🇭</span>
-      <span class="cc-symbol">₱</span>
-      <span class="cc-name">Peso</span>
-      <span class="cc-lang">FILIPINO / TAGALOG</span>
-    </div>
-    <div class="currency-card" onclick="selectCurrency('USD')">
-      <span class="cc-flag">🇺🇸</span>
-      <span class="cc-symbol">$</span>
-      <span class="cc-name">Dollar</span>
-      <span class="cc-lang">ENGLISH</span>
-    </div>
-  </div>
-</div>
-
-<!-- ══════════════════════════════════════════════════
-     UPLOAD STATE
-══════════════════════════════════════════════════ -->
-<div id="upload-state">
-  <div class="currency-badge" id="currency-badge-display"></div>
-  <h2 class="upload-area-title" id="upload-title">Upload Logbook Excel</h2>
-  <p class="upload-area-sub" id="upload-sub">Drag &amp; drop atau klik untuk memilih file</p>
-
-  <div id="drop-zone" onclick="document.getElementById('file-input').click()">
-    <span class="upload-icon-wrap">🗺️</span>
-    <p class="drop-main" id="drop-main-text">Seret &amp; lepas file Excel di sini</p>
-    <p class="drop-sub" id="drop-sub-text">.xlsx · .xls</p>
-    <div class="dz-wave"></div>
-  </div>
-
-  <input type="file" id="file-input" accept=".xlsx,.xls"/>
-  <div id="error-box" class="error-banner"><span style="font-size:18px;flex-shrink:0">⚠️</span><p id="error-msg"></p></div>
-
-  <div class="btn-row">
-    <button class="btn-ghost" onclick="downloadTemplate()">⬇ <span id="btn-template-text">Download Template</span></button>
-    <button class="btn-ghost btn-secondary" onclick="goBack()">← <span id="btn-back-text">Ganti Bahasa</span></button>
-  </div>
-</div>
-
-<!-- ══════════════════════════════════════════════════
-     CINEMATIC LOADING
-══════════════════════════════════════════════════ -->
-<div id="loading-screen">
-  <div class="loading-ship">🚢</div>
-  <h2 class="loading-title" id="loading-title">Setting Sail...</h2>
-  <div class="loading-step" id="loading-step">Initializing navigation systems...</div>
-  <div class="loading-bar-wrap"><div class="loading-bar" id="loading-bar"></div></div>
-  <div class="loading-dots"><div class="loading-dot"></div><div class="loading-dot"></div><div class="loading-dot"></div></div>
-</div>
-
-<!-- ══════════════════════════════════════════════════
-     DASHBOARD
-══════════════════════════════════════════════════ -->
-<div id="dashboard">
-
-  <!-- Topbar -->
-  <div class="topbar">
-    <div class="topbar-left">
-      <div class="topbar-file" id="db-filename"></div>
-      <div class="topbar-title">⚓ The Great Voyage</div>
-    </div>
-    <div class="topbar-right">
-      <div class="inflation-badge">🌊 <span id="db-inflation-label">Inflation</span>: <span id="db-inflation-val">4%</span></div>
-      <button class="btn-sm" onclick="openDetailModal()">🔍 <span id="btn-detail-text">View Details</span></button>
-      <button class="btn-sm" onclick="resetToUpload()">↩ <span id="btn-change-text">Change File</span></button>
-      <button class="btn-sm" onclick="goBack()">⚑ <span id="btn-currency-text">Currency</span></button>
-    </div>
-  </div>
-
-  <!-- Inflation slider -->
-  <div class="inflation-control">
-    <label id="inflation-label-text">🌊 Inflasi Tahunan <span class="en-hint">(Annual Inflation)</span></label>
-    <input type="range" min="1" max="12" value="4" step="0.5" id="inflation-slider" oninput="onInflationChange(this.value)"/>
-    <span class="inf-val" id="inflation-display">4.0%</span>
-  </div>
-
-  <!-- Row 1: Vessel + FIRE -->
-  <div class="grid-2">
-    <!-- Vessel -->
-    <div class="card vessel-wrap">
-      <div class="card-label" style="text-align:center;margin-bottom:12px" id="vessel-label">Armada Investasi <span class="en-hint">(Investment Fleet)</span></div>
-      <svg id="vessel-svg" class="vessel-svg" viewBox="0 0 280 180" xmlns="http://www.w3.org/2000/svg">
-        <defs>
-          <filter id="glow"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
-        </defs>
-        <ellipse cx="140" cy="160" rx="118" ry="11" fill="#0D2137" opacity=".9"/>
-        <path d="M22 155 Q60 148 100 155 Q140 163 180 155 Q220 148 258 155" stroke="#2DD4BF" stroke-width="1.5" fill="none" opacity=".3"/>
-        <path id="v-hull" d="M52 120 L63 147 L217 147 L228 120 Z" fill="#2DD4BF" opacity=".85" filter="url(#glow)"/>
-        <rect id="v-hull2" x="52" y="113" width="176" height="9" rx="2" fill="#2DD4BF" opacity=".5"/>
-        <rect x="90" y="85" width="100" height="35" rx="4" fill="#0F2744" stroke="#C5A059" stroke-width="1.2"/>
-        <rect x="100" y="93" width="18" height="13" rx="2" fill="#0A192F" stroke="#2DD4BF" stroke-width=".8" opacity=".9"/>
-        <rect x="126" y="93" width="18" height="13" rx="2" fill="#0A192F" stroke="#2DD4BF" stroke-width=".8" opacity=".9"/>
-        <rect x="152" y="93" width="18" height="13" rx="2" fill="#0A192F" stroke="#2DD4BF" stroke-width=".8" opacity=".9"/>
-        <rect id="v-engine" x="154" y="60" width="22" height="32" rx="3" fill="#C5A059" opacity=".9" filter="url(#glow)"/>
-        <rect id="v-engine2" x="159" y="52" width="12" height="13" rx="2" fill="#C5A059" opacity=".8"/>
-        <circle id="v-smoke1" cx="165" cy="46" r="5" fill="#C5A059" opacity=".5"/>
-        <circle id="v-smoke2" cx="161" cy="38" r="4" fill="#C5A059" opacity=".3"/>
-        <circle id="v-smoke3" cx="168" cy="31" r="3" fill="#C5A059" opacity=".18"/>
-        <line x1="130" y1="30" x2="130" y2="90" stroke="#C5A059" stroke-width="2"/>
-        <line x1="100" y1="50" x2="160" y2="50" stroke="#C5A059" stroke-width="1.2"/>
-        <polygon points="130,30 155,40 130,50" fill="#E8C97A" opacity=".9"/>
-        <circle id="v-life" cx="65" cy="115" r="12" fill="none" stroke="#A78BFA" stroke-width="3.5" filter="url(#glow)"/>
-        <circle cx="65" cy="115" r="5" fill="#A78BFA" opacity=".2"/>
-        <line x1="65" y1="103" x2="65" y2="109" stroke="#A78BFA" stroke-width="2"/>
-        <line x1="65" y1="121" x2="65" y2="127" stroke="#A78BFA" stroke-width="2"/>
-        <line x1="53" y1="115" x2="59" y2="115" stroke="#A78BFA" stroke-width="2"/>
-        <line x1="71" y1="115" x2="77" y2="115" stroke="#A78BFA" stroke-width="2"/>
-        <text x="208" y="140" font-size="14" fill="#C5A059" opacity=".6">⚓</text>
-      </svg>
-      <div id="asset-legend" style="width:100%;margin-top:16px"></div>
-    </div>
-
-    <!-- FIRE status -->
-    <div style="display:flex;flex-direction:column;gap:12px">
-      <div class="fire-card">
-        <div class="card-label" id="fire-label">Sisa Perjalanan <span class="en-hint">(Journey Remaining)</span></div>
-        <div class="fire-number" id="stat-contracts">—</div>
-        <div class="fire-sub" id="stat-years">—</div>
-        <div id="fire-badge-wrap"></div>
-        <div class="inflation-note" id="inflation-note" style="display:none"></div>
-      </div>
-      <div class="metric-row">
-        <span class="metric-label" id="m-fuel-label">Bensin Tahunan<span class="metric-label-en">Annual Fuel / Net Savings</span></span>
-        <span class="metric-value" style="color:var(--gold)" id="m-fuel">—</span>
-      </div>
-      <div class="metric-row">
-        <span class="metric-label" id="m-fire-label">Modal FIRE<span class="metric-label-en">FIRE Capital (Target × 25)</span></span>
-        <span class="metric-value" style="color:var(--teal)" id="m-fire">—</span>
-      </div>
-      <div class="metric-row">
-        <span class="metric-label" id="m-return-label">Weighted Return<span class="metric-label-en">Blended Portfolio Return</span></span>
-        <span class="metric-value" style="color:var(--purple)" id="m-return">—</span>
-      </div>
-      <div class="metric-row">
-        <span class="metric-label" id="m-target-label">Passive Income Target<span class="metric-label-en">Monthly Freedom Income</span></span>
-        <span class="metric-value" style="color:var(--green)" id="m-target">—</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- Row 2: stat cards -->
-  <div class="grid-3">
-    <div class="stat-card">
-      <span class="stat-icon">⚡</span>
-      <div class="stat-label" id="s-on-label">On-Board</div>
-      <div class="stat-label-en">Months at Sea</div>
-      <div class="stat-value" id="s-on">—</div>
-      <div class="stat-unit" id="s-on-unit">per kontrak</div>
-    </div>
-    <div class="stat-card">
-      <span class="stat-icon">🏠</span>
-      <div class="stat-label" id="s-off-label">Off-Board</div>
-      <div class="stat-label-en">Shore Leave</div>
-      <div class="stat-value" id="s-off">—</div>
-      <div class="stat-unit" id="s-off-unit">per kontrak</div>
-    </div>
-    <div class="stat-card">
-      <span class="stat-icon">💰</span>
-      <div class="stat-label" id="s-gaji-label">Gaji Laut</div>
-      <div class="stat-label-en">Sea Wages / Month</div>
-      <div class="stat-value" id="s-gaji">—</div>
-      <div class="stat-unit" id="s-gaji-unit">gross / bulan</div>
-    </div>
-  </div>
-
-  <!-- Chart -->
-  <div class="chart-card">
-    <div class="section-hdr" id="chart-label">📈 Proyeksi Pelayaran — <span class="en-hint">Wealth Projection</span></div>
-    <div class="chart-wrap"><canvas id="voyage-chart"></canvas></div>
-    <div id="fire-chart-note" style="text-align:center;font-size:12px;margin-top:12px;color:var(--green);display:none"></div>
-  </div>
-
-  <!-- Navigation Transparency (Analytics) -->
-  <div class="analytics-card">
-    <div class="analytics-header" onclick="toggleAnalytics()">
-      <div>
-        <div class="section-hdr" style="margin-bottom:2px" id="analytics-label">🔭 Navigation Transparency</div>
-        <div style="font-size:12px;color:var(--muted)" id="analytics-sub">Lihat detail kalkulasi — How your numbers are calculated</div>
-      </div>
-      <div class="analytics-toggle" id="analytics-toggle">▾</div>
-    </div>
-    <div class="analytics-body" id="analytics-body">
-
-      <!-- Fuel Formula -->
-      <div class="analytics-section">
-        <div class="analytics-title" id="fuel-formula-label">⛽ Cara Hitung Bensin (Annual Fuel)</div>
-        <div class="formula-box" id="fuel-formula-box">
-          Loading...
-        </div>
-      </div>
-
-      <!-- Weighted Return -->
-      <div class="analytics-section">
-        <div class="analytics-title">⚖️ Cara Hitung Weighted Return</div>
-        <div class="formula-box" id="wr-formula-box">Loading...</div>
-        <table class="year-table" style="margin-top:12px" id="wr-table">
-          <thead><tr>
-            <th id="wrt-asset">Aset</th><th id="wrt-alloc">Alokasi</th><th id="wrt-return">Return</th><th id="wrt-contrib">Kontribusi</th>
-          </tr></thead>
-          <tbody id="wr-tbody"></tbody>
-        </table>
-      </div>
-
-      <!-- Year growth table -->
-      <div class="analytics-section">
-        <div class="analytics-title" id="growth-label">📅 Pertumbuhan Aset Per Tahun (Inflation-Adjusted)</div>
-        <table class="year-table" id="growth-table">
-          <thead><tr>
-            <th id="gt-year">Tahun</th>
-            <th id="gt-saving">Tabungan Kumulatif</th>
-            <th id="gt-portfolio">Portfolio</th>
-            <th id="gt-fire-gap">Gap ke FIRE</th>
-            <th id="gt-status">Status</th>
-          </tr></thead>
-          <tbody id="growth-tbody"></tbody>
-        </table>
-        <button class="show-more-btn" id="show-more-btn" onclick="toggleGrowthTable()">▾ Tampilkan Semua 30 Tahun</button>
-      </div>
-    </div>
-  </div>
-
-  <!-- Asset table -->
-  <div class="card" style="margin-bottom:20px">
-    <div class="section-hdr" id="manifest-label">📋 Manifest Aset — <span class="en-hint">Vessel Parts</span></div>
-    <table class="asset-table">
-      <thead><tr>
-        <th id="at-name">Nama Aset</th><th id="at-alloc">Alokasi</th><th id="at-return">Return/Thn</th><th id="at-annual">Annual Allocation</th>
-      </tr></thead>
-      <tbody id="asset-tbody"></tbody>
-    </table>
-  </div>
-
-  <div class="footer" id="footer-text">THE GREAT VOYAGE v3.0 · SEAFARER WEALTH NAVIGATOR · INFLATION-ADJUSTED FIRE ENGINE</div>
-</div><!-- #dashboard -->
-
-</div><!-- #app -->
-
-<!-- ══════════ CHANGELOG FAB ══════════ -->
-<button id="fab-changelog" onclick="toggleChangelog()">
-  📜
-  <span class="fab-tooltip">Voyage Log</span>
-</button>
-
-<!-- ══════════ CHANGELOG MODAL ══════════ -->
-<div id="changelog-modal">
-  <div class="modal-backdrop" onclick="toggleChangelog()"></div>
-  <div class="modal-box">
-    <div class="modal-hdr">
-      <h2>📜 Voyage Log — Changelog</h2>
-      <button class="modal-close" onclick="toggleChangelog()">×</button>
-    </div>
-    <div class="modal-body">
-      <div class="changelog-entry">
-        <div class="ch-version">v3.0.0</div>
-        <div class="ch-date">2025 · Navigator Edition</div>
-        <div class="ch-title">The Grand Overhaul</div>
-        <ul class="ch-items">
-          <li>Smart Localization: IDR/PHP/USD dengan UI multi-bahasa</li>
-          <li>Dual-language UX dengan English reference hints</li>
-          <li>Inflation-Adjusted FIRE Logic (default 4%, adjustable)</li>
-          <li>Navigation Transparency — rincian kalkulasi lengkap</li>
-          <li>Expandable year-by-year growth table (30 tahun)</li>
-          <li>Cinematic loading screen dengan progressive text</li>
-          <li>PWA support — installable & offline capable</li>
-          <li>Dynamic Excel template per bahasa</li>
-          <li>Voyage Log changelog (ini yang sedang kamu baca!)</li>
-        </ul>
-      </div>
-      <div class="changelog-entry">
-        <div class="ch-version">v2.0.0</div>
-        <div class="ch-date">2025 · Dual Currency Edition</div>
-        <div class="ch-title">IDR/USD Toggle & Simplified Excel</div>
-        <ul class="ch-items">
-          <li>Toggle IDR ↔ USD di dashboard</li>
-          <li>Excel template disederhanakan menjadi 1 sheet (Logbook)</li>
-          <li>Kolom IDR otomatis via formula kurs</li>
-          <li>Ringkasan otomatis dengan formula Excel</li>
-        </ul>
-      </div>
-      <div class="changelog-entry">
-        <div class="ch-version">v1.5.0</div>
-        <div class="ch-date">2025 · Optimized Excel Edition</div>
-        <div class="ch-title">Excel Template Optimization</div>
-        <ul class="ch-items">
-          <li>Template Excel dengan styling Navy & Gold</li>
-          <li>3 sheet: Fueling, VesselParts, Target</li>
-          <li>Validasi kolom Excel saat upload</li>
-          <li>Error notification yang spesifik</li>
-        </ul>
-      </div>
-      <div class="changelog-entry">
-        <div class="ch-version">v1.0.0</div>
-        <div class="ch-date">2025 · Initial Release</div>
-        <div class="ch-title">The Great Voyage Launches</div>
-        <ul class="ch-items">
-          <li>Excel-to-Dashboard pipeline pertama</li>
-          <li>FIRE calculation engine (Target × 25)</li>
-          <li>Vessel SVG dengan warna dinamis per aset</li>
-          <li>Wealth projection chart (30 tahun)</li>
-          <li>Drop zone file upload dengan validasi</li>
-        </ul>
-      </div>
-    </div>
-  </div>
-</div>
-
-<!-- ══════════ DETAIL MODAL ══════════ -->
-<div id="detail-modal">
-  <div class="modal-backdrop" onclick="closeDetailModal()"></div>
-  <div class="modal-box">
-    <div class="modal-hdr">
-      <h2 id="detail-modal-title">📊 Detail Kalkulasi</h2>
-      <button class="modal-close" onclick="closeDetailModal()">×</button>
-    </div>
-    <div class="modal-body" id="detail-modal-body">
-    </div>
-  </div>
-</div>
-
-<script>
-// ══════════════════════════════════════════════════════════════════════════════
-// LOCALIZATION
-// ══════════════════════════════════════════════════════════════════════════════
-const L = {
-  IDR: {
-    lang:'id', symbol:'Rp', flag:'🇮🇩', name:'Rupiah', langName:'Bahasa Indonesia',
-    uploadTitle:'Upload Logbook Excel',
-    uploadSub:'Seret & lepas atau klik untuk memilih file Excel kamu',
-    dropMain:'Seret & lepas file Excel di sini',
-    dropSub:'.xlsx · .xls',
-    btnTemplate:'Download Template Logbook',
-    btnBack:'Ganti Bahasa',
-    btnDetail:'Lihat Detail',
-    btnChange:'Ganti File',
-    btnCurrency:'Mata Uang',
-    loadingTitle:'Merencanakan Rute...',
-    loadingSteps:['Membaca data logbook...','Menyesuaikan dengan arus inflasi...','Menghitung bobot return...','Memasang pelampung keselamatan...','Rute siap, Kapten!'],
-    inflationLabel:'🌊 Inflasi Tahunan',
-    vesselLabel:'Armada Investasi',
-    fireLabel:'Sisa Perjalanan',
-    fireContracts:(n)=>`${n} Kontrak`,
-    fireYears:(y)=>`≈ ${y.toFixed(1)} tahun menuju FIRE`,
-    fuelLabel:'Bensin Tahunan',
-    fuelEn:'Annual Fuel / Net Savings',
-    fireCapLabel:'Modal FIRE',
-    fireCapEn:'FIRE Capital (Target × 25)',
-    returnLabel:'Weighted Return',
-    returnEn:'Blended Portfolio Return',
-    targetLabel:'Target Passive Income',
-    targetEn:'Monthly Freedom Income',
-    onLabel:'On-Board', offLabel:'Off-Board', gajiLabel:'Gaji Laut',
-    perContract:'per kontrak', perMonth:'/ bulan',
-    chartLabel:'📈 Proyeksi Pelayaran',
-    analyticsLabel:'🔭 Navigation Transparency',
-    analyticsSub:'Lihat detail kalkulasi — How your numbers are calculated',
-    fuelFormulaLabel:'⛽ Cara Hitung Bensin (Annual Fuel)',
-    growthLabel:'📅 Pertumbuhan Aset Per Tahun (Inflation-Adjusted)',
-    manifestLabel:'📋 Manifest Aset',
-    atName:'Nama Aset', atAlloc:'Alokasi', atReturn:'Return/Thn', atAnnual:'Alokasi Tahunan',
-    showMore:'▾ Tampilkan Semua 30 Tahun', showLess:'▴ Sembunyikan',
-    gtYear:'Tahun', gtSaving:'Tabungan Kumulatif', gtPortfolio:'Portfolio', gtGap:'Gap ke FIRE', gtStatus:'Status',
-    wrtAsset:'Aset', wrtAlloc:'Alokasi', wrtReturn:'Return', wrtContrib:'Kontribusi',
-    fireBadge:(y)=>`🎯 FIRE tercapai di Tahun ${y}`,
-    fireChartNote:(y)=>`🎯 FIRE tercapai sekitar Tahun ${y} dengan jalur investasi`,
-    inflationNote:'Nilai target telah disesuaikan dengan estimasi inflasi agar daya beli masa depan tetap sama.',
-    detailTitle:'📊 Detail Kalkulasi',
-    excelHeaders:{
-      fuelSheet:'Data Kontrak',
-      bulanOn:'Bulan_Kerja', bulanOff:'Bulan_Libur', gajiLaut:'Gaji_Per_Bulan',
-      biayaLaut:'Pengeluaran_Di_Kapal', biayaDarat:'Pengeluaran_Di_Darat', kurs:'Kurs_USD_ke_IDR',
-      partsSheet:'Alokasi Investasi',
-      namaAset:'Nama_Investasi', alokasiPersen:'Porsi_Persen', returnPersen:'Return_Persen',
-      targetSheet:'Target FIRE',
-      targetPI:'Target_Passive_Income', kursTarget:'Kurs_USD_ke_IDR'
-    }
-  },
-  PHP: {
-    lang:'tl', symbol:'₱', flag:'🇵🇭', name:'Peso', langName:'Filipino / Tagalog',
-    uploadTitle:'I-upload ang Logbook Excel',
-    uploadSub:'I-drag & drop o mag-click para pumili ng file',
-    dropMain:'I-drag & drop ang Excel file dito',
-    dropSub:'.xlsx · .xls',
-    btnTemplate:'I-download ang Template',
-    btnBack:'Palitan ang Wika',
-    btnDetail:'Tingnan ang Detalye',
-    btnChange:'Palitan ang File',
-    btnCurrency:'Pera',
-    loadingTitle:'Pinaplano ang Ruta...',
-    loadingSteps:['Binabasa ang logbook...','Inaayos para sa implasyon...','Kinakalkula ang weighted return...','Inilalagay ang lifebuoys...','Handa na ang ruta, Kapitan!'],
-    inflationLabel:'🌊 Taunang Implasyon',
-    vesselLabel:'Fleet ng Pamumuhunan',
-    fireLabel:'Natitirang Paglalakbay',
-    fireContracts:(n)=>`${n} Kontrata`,
-    fireYears:(y)=>`≈ ${y.toFixed(1)} taon para sa FIRE`,
-    fuelLabel:'Taunang Gasolina',
-    fuelEn:'Annual Fuel / Net Savings',
-    fireCapLabel:'FIRE Capital',
-    fireCapEn:'FIRE Capital (Target × 25)',
-    returnLabel:'Weighted Return',
-    returnEn:'Blended Portfolio Return',
-    targetLabel:'Target na Kita',
-    targetEn:'Monthly Freedom Income',
-    onLabel:'Sa Barko', offLabel:'Sa Bahay', gajiLabel:'Sahod sa Dagat',
-    perContract:'bawat kontrata', perMonth:'/ buwan',
-    chartLabel:'📈 Proyeksyon ng Yaman',
-    analyticsLabel:'🔭 Navigation Transparency',
-    analyticsSub:'Tingnan ang detalye — How your numbers are calculated',
-    fuelFormulaLabel:'⛽ Paano Kinakalkula ang Gasolina',
-    growthLabel:'📅 Paglago ng Asset Bawat Taon (Inflation-Adjusted)',
-    manifestLabel:'📋 Manifest ng Asset',
-    atName:'Pangalan ng Asset', atAlloc:'Alokasyon', atReturn:'Return/Taon', atAnnual:'Taunang Alokasyon',
-    showMore:'▾ Ipakita Lahat ng 30 Taon', showLess:'▴ Itago',
-    gtYear:'Taon', gtSaving:'Pinagsama-samang Ipon', gtPortfolio:'Portfolio', gtGap:'Gap sa FIRE', gtStatus:'Katayuan',
-    wrtAsset:'Asset', wrtAlloc:'Alokasyon', wrtReturn:'Return', wrtContrib:'Kontribusyon',
-    fireBadge:(y)=>`🎯 Naabot ang FIRE sa Taon ${y}`,
-    fireChartNote:(y)=>`🎯 Naabot ang FIRE mga Taon ${y} sa landas ng pamumuhunan`,
-    inflationNote:'Ang iyong target ay naayos na para sa implasyon upang mapanatili ang kapangyarihan ng pagbili.',
-    detailTitle:'📊 Mga Detalye ng Kalkulasyon',
-    excelHeaders:{
-      fuelSheet:'Data ng Kontrata',
-      bulanOn:'Buwan_sa_Barko', bulanOff:'Buwan_sa_Bahay', gajiLaut:'Sahod_Bawat_Buwan',
-      biayaLaut:'Gastos_sa_Barko', biayaDarat:'Gastos_sa_Bahay', kurs:'Palitan_USD_sa_PHP',
-      partsSheet:'Alokasyon ng Pamumuhunan',
-      namaAset:'Pangalan_ng_Pamumuhunan', alokasiPersen:'Bahagdan_Alokasyon', returnPersen:'Bahagdan_Return',
-      targetSheet:'Target na FIRE',
-      targetPI:'Target_na_Kita_Buwanan', kursTarget:'Palitan_USD_sa_PHP'
-    }
-  },
-  USD: {
-    lang:'en', symbol:'$', flag:'🇺🇸', name:'Dollar', langName:'English',
-    uploadTitle:'Upload Your Excel Logbook',
-    uploadSub:'Drag & drop or click to select your Excel file',
-    dropMain:'Drag & drop Excel file here',
-    dropSub:'.xlsx · .xls',
-    btnTemplate:'Download Template',
-    btnBack:'Change Currency',
-    btnDetail:'View Details',
-    btnChange:'Change File',
-    btnCurrency:'Currency',
-    loadingTitle:'Plotting Course...',
-    loadingSteps:['Reading logbook data...','Adjusting for inflation currents...','Calculating weighted return...','Deploying lifebuoys...','Course plotted, Captain!'],
-    inflationLabel:'🌊 Annual Inflation',
-    vesselLabel:'Investment Fleet',
-    fireLabel:'Journey Remaining',
-    fireContracts:(n)=>`${n} Contracts`,
-    fireYears:(y)=>`≈ ${y.toFixed(1)} years to FIRE`,
-    fuelLabel:'Annual Fuel',
-    fuelEn:'Net Annual Savings',
-    fireCapLabel:'FIRE Capital',
-    fireCapEn:'FIRE Capital (Target × 25)',
-    returnLabel:'Weighted Return',
-    returnEn:'Blended Portfolio Return',
-    targetLabel:'Passive Income Target',
-    targetEn:'Monthly Freedom Income',
-    onLabel:'On-Board', offLabel:'Off-Board', gajiLabel:'Sea Wages',
-    perContract:'per contract', perMonth:'/ month',
-    chartLabel:'📈 Voyage Projection',
-    analyticsLabel:'🔭 Navigation Transparency',
-    analyticsSub:'Detailed breakdown — How your numbers are calculated',
-    fuelFormulaLabel:'⛽ How Annual Fuel is Calculated',
-    growthLabel:'📅 Asset Growth Per Year (Inflation-Adjusted)',
-    manifestLabel:'📋 Asset Manifest',
-    atName:'Asset Name', atAlloc:'Allocation', atReturn:'Return/Yr', atAnnual:'Annual Allocation',
-    showMore:'▾ Show All 30 Years', showLess:'▴ Collapse',
-    gtYear:'Year', gtSaving:'Cumulative Savings', gtPortfolio:'Portfolio', gtGap:'Gap to FIRE', gtStatus:'Status',
-    wrtAsset:'Asset', wrtAlloc:'Allocation', wrtReturn:'Return', wrtContrib:'Contribution',
-    fireBadge:(y)=>`🎯 FIRE reached at Year ${y}`,
-    fireChartNote:(y)=>`🎯 FIRE achieved around Year ${y} on the investment path`,
-    inflationNote:'Your target has been adjusted for estimated inflation to preserve future purchasing power.',
-    detailTitle:'📊 Calculation Details',
-    excelHeaders:{
-      fuelSheet:'Contract Data',
-      bulanOn:'Months_Onboard', bulanOff:'Months_Leave', gajiLaut:'Monthly_Wage',
-      biayaLaut:'Sea_Expenses', biayaDarat:'Shore_Expenses', kurs:'USD_Exchange_Rate',
-      partsSheet:'Investment Allocation',
-      namaAset:'Investment_Name', alokasiPersen:'Allocation_Percent', returnPersen:'Return_Percent',
-      targetSheet:'FIRE Target',
-      targetPI:'Monthly_Passive_Income_Target', kursTarget:'USD_Exchange_Rate'
-    }
-  }
-};
-
-// ══════════════════════════════════════════════════════════════════════════════
-// STATE
-// ══════════════════════════════════════════════════════════════════════════════
-let currentCurrency = 'IDR';
-let currentData     = null;
-let inflationRate   = 0.04;
-let chartInstance   = null;
-let growthExpanded  = false;
-
-const COLORS = ['#C5A059','#2DD4BF','#A78BFA','#F472B6','#22C55E','#60A5FA'];
-
-// ══════════════════════════════════════════════════════════════════════════════
-// STARS
-// ══════════════════════════════════════════════════════════════════════════════
-function buildStars() {
-  const sf = document.getElementById('starfield');
-  for (let i = 0; i < 120; i++) {
-    const s = document.createElement('div');
-    s.className = 'star';
-    const size = Math.random() * 2 + 0.5;
-    s.style.cssText = `width:${size}px;height:${size}px;left:${Math.random()*100}%;top:${Math.random()*100}%;
-      --d:${(Math.random()*4+2).toFixed(1)}s;--delay:-${(Math.random()*6).toFixed(1)}s;
-      --min-op:${(Math.random()*.15+.03).toFixed(2)};--max-op:${(Math.random()*.6+.2).toFixed(2)}`;
-    sf.appendChild(s);
-  }
+  XLSX.writeFile(wb, "GreatVoyage_Logbook_Template.xlsx");
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// CURRENCY SELECTION
-// ══════════════════════════════════════════════════════════════════════════════
-function selectCurrency(cur) {
-  currentCurrency = cur;
-  const l = L[cur];
-  document.querySelectorAll('.currency-card').forEach(c => c.classList.remove('active'));
-  event && event.target.closest('.currency-card') && event.target.closest('.currency-card').classList.add('active');
+// ─── CALCULATION ENGINE ──────────────────────────────────────────────────────
+function calculate(fuelRow, parts, targetRow) {
+  const { Bulan_On: on, Bulan_Off: off, Gaji_Laut: gaji, Biaya_Laut: biayaLaut, Biaya_Darat: biayaDarat } = fuelRow;
+  const { Target_Passive_Income: targetPI } = targetRow;
 
-  // Apply localization to upload state
-  document.getElementById('currency-badge-display').innerHTML = `${l.flag} ${l.symbol} ${l.name} · ${l.langName}`;
-  document.getElementById('upload-title').textContent = l.uploadTitle;
-  document.getElementById('upload-sub').textContent = l.uploadSub;
-  document.getElementById('drop-main-text').textContent = l.dropMain;
-  document.getElementById('drop-sub-text').textContent = l.dropSub;
-  document.getElementById('btn-template-text').textContent = l.btnTemplate;
-  document.getElementById('btn-back-text').textContent = l.btnBack;
+  const annualFuel = (gaji * on) - (biayaLaut * on) - (biayaDarat * off);
+  const totalMonths = on + off;
+  const contractsPerYear = 12 / totalMonths;
+  const annualSaving = annualFuel;
 
-  // Switch screens
-  document.getElementById('currency-selector').style.display = 'none';
-  document.getElementById('upload-state').style.display = 'flex';
-  document.getElementById('upload-state').classList.add('active');
-  clearError();
-}
+  // Weighted average return
+  const weightedReturn = parts.reduce((acc, p) => {
+    return acc + (p.Alokasi_Persen / 100) * (p.Return_Persen / 100);
+  }, 0);
 
-function goBack() {
-  document.getElementById('currency-selector').style.display = 'flex';
-  document.getElementById('upload-state').style.display = 'none';
-  document.getElementById('dashboard').classList.remove('active');
-  document.getElementById('dashboard').style.display = 'none';
-}
+  // FIRE target: Target * 25 (4% rule)
+  const fireCapital = targetPI * 12 * 25;
 
-function resetToUpload() {
-  document.getElementById('dashboard').classList.remove('active');
-  document.getElementById('dashboard').style.display = 'none';
-  document.getElementById('upload-state').style.display = 'flex';
-  document.getElementById('file-input').value = '';
-  clearError();
-  if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
-}
+  // Projection: compound growth on accumulated portfolio
+  const projectionData = [];
+  let portfolio = 0;
+  let salaryAccum = 0;
+  const years = 30;
 
-// ══════════════════════════════════════════════════════════════════════════════
-// FILE HANDLING
-// ══════════════════════════════════════════════════════════════════════════════
-const dz = document.getElementById('drop-zone');
-dz.addEventListener('dragover',  e => { e.preventDefault(); dz.classList.add('drag-over'); });
-dz.addEventListener('dragleave', ()  => dz.classList.remove('drag-over'));
-dz.addEventListener('drop', e => {
-  e.preventDefault(); dz.classList.remove('drag-over');
-  const f = e.dataTransfer.files[0];
-  if (f) readFile(f);
-});
-document.getElementById('file-input').addEventListener('change', e => {
-  if (e.target.files[0]) readFile(e.target.files[0]);
-});
-
-function showError(msg) {
-  const box = document.getElementById('error-box');
-  document.getElementById('error-msg').textContent = msg;
-  box.classList.add('show');
-}
-function clearError() {
-  document.getElementById('error-box').classList.remove('show');
-}
-
-function readFile(file) {
-  clearError();
-  startLoadingScreen(file.name);
-  const reader = new FileReader();
-  reader.onload = e => {
-    setTimeout(() => { // allow loading animation to start
-      try {
-        const wb = XLSX.read(e.target.result, { type: 'array' });
-        const miss = ['Fueling','VesselParts','Target'].filter(s => !wb.SheetNames.includes(s));
-        if (miss.length) { endLoadingScreen(); showError(`Sheet tidak ditemukan: ${miss.join(', ')}. Gunakan template yang disediakan.`); return; }
-
-        const fuel   = XLSX.utils.sheet_to_json(wb.Sheets['Fueling']);
-        const parts  = XLSX.utils.sheet_to_json(wb.Sheets['VesselParts']);
-        const target = XLSX.utils.sheet_to_json(wb.Sheets['Target']);
-
-        const fRow = fuel[0] || {};
-        // Accept both English and localized column names by trying aliases
-        const fuelCols = getFuelRow(fRow);
-        if (!fuelCols) { endLoadingScreen(); showError('Kolom wajib tidak ditemukan di sheet Fueling. Gunakan template yang disediakan.'); return; }
-
-        const pRow = parts[0] || {};
-        const partsCols = getPartsCols(parts);
-        if (!partsCols) { endLoadingScreen(); showError('Kolom wajib tidak ditemukan di sheet VesselParts.'); return; }
-
-        const tRow = target[0] || {};
-        const targetPI = getTargetPI(tRow);
-        if (targetPI === null) { endLoadingScreen(); showError('Kolom target passive income tidak ditemukan di sheet Target.'); return; }
-
-        const kurs = Number(fuelCols.kurs) || 16000;
-
-        currentData = { fuelCols, partsCols, targetPI, kurs, fileName: file.name };
-        finishLoading();
-      } catch(err) {
-        endLoadingScreen();
-        showError('Gagal membaca file. Pastikan format Excel valid.');
-      }
-    }, 200);
-  };
-  reader.readAsArrayBuffer(file);
-}
-
-// Flexible column matching
-function getFuelRow(row) {
-  const aliases = {
-    on: ['Bulan_On','Months_Onboard','Buwan_sa_Barko','Bulan_Kerja'],
-    off:['Bulan_Off','Months_Leave','Buwan_sa_Bahay','Bulan_Libur'],
-    gaji:['Gaji_Laut','Monthly_Wage','Sahod_Bawat_Buwan','Gaji_Per_Bulan'],
-    biayaL:['Biaya_Laut','Sea_Expenses','Gastos_sa_Barko','Pengeluaran_Di_Kapal'],
-    biayaD:['Biaya_Darat','Shore_Expenses','Gastos_sa_Bahay','Pengeluaran_Di_Darat'],
-    kurs:['Kurs_IDR','USD_Exchange_Rate','Palitan_USD_sa_PHP','Kurs_USD_ke_IDR','Kurs_IDR',1]
-  };
-  const result = {};
-  for (const [key, alts] of Object.entries(aliases)) {
-    let found = false;
-    for (const a of alts) {
-      if (a in row) { result[key] = Number(row[a]); found = true; break; }
-    }
-    if (!found && key !== 'kurs') return null;
-    if (!found && key === 'kurs') result[key] = 16000;
-  }
-  return result;
-}
-
-function getPartsCols(parts) {
-  if (!parts.length) return null;
-  const nameAliases = ['Nama_Aset','Investment_Name','Pangalan_ng_Pamumuhunan','Nama_Investasi'];
-  const allocAliases = ['Alokasi_Persen','Allocation_Percent','Bahagdan_Alokasyon'];
-  const returnAliases = ['Return_Persen','Return_Percent','Bahagdan_Return'];
-  return parts.map(r => {
-    let nm='', al=0, ret=0;
-    for(const a of nameAliases) if(a in r){nm=r[a];break;}
-    for(const a of allocAliases) if(a in r){al=Number(r[a]);break;}
-    for(const a of returnAliases) if(a in r){ret=Number(r[a]);break;}
-    return { Nama_Aset: nm||'Asset', Alokasi_Persen: al, Return_Persen: ret };
-  });
-}
-
-function getTargetPI(row) {
-  const aliases = ['Target_Passive_Income','Monthly_Passive_Income_Target','Target_na_Kita_Buwanan','Target_Passive_Income'];
-  for (const a of aliases) if (a in row) return Number(row[a]);
-  return null;
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// CINEMATIC LOADING
-// ══════════════════════════════════════════════════════════════════════════════
-let loadingTimer = null;
-
-function startLoadingScreen(fname) {
-  const l = L[currentCurrency];
-  const ls = document.getElementById('loading-screen');
-  document.getElementById('loading-title').textContent = l.loadingTitle;
-  document.getElementById('loading-step').textContent = '';
-  document.getElementById('loading-bar').style.width = '0%';
-  ls.classList.add('active');
-
-  let step = 0;
-  const steps = l.loadingSteps;
-  const total = steps.length;
-  loadingTimer = setInterval(() => {
-    if (step < total) {
-      document.getElementById('loading-step').textContent = steps[step];
-      document.getElementById('loading-bar').style.width = `${((step+1)/total)*90}%`;
-      step++;
-    }
-  }, 480);
-}
-
-function endLoadingScreen() {
-  clearInterval(loadingTimer);
-  document.getElementById('loading-screen').classList.remove('active');
-}
-
-function finishLoading() {
-  const bar = document.getElementById('loading-bar');
-  bar.style.width = '100%';
-  clearInterval(loadingTimer);
-  setTimeout(() => {
-    endLoadingScreen();
-    renderDashboard(currentData);
-  }, 600);
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// CALCULATION ENGINE (Inflation-Adjusted)
-// ══════════════════════════════════════════════════════════════════════════════
-function calculate(fuelCols, parts, targetPI, inflation) {
-  const { on, off, gaji, biayaL, biayaD } = fuelCols;
-  const annualFuel  = (gaji * on) - (biayaL * on) - (biayaD * off);
-  const cPerYear    = 12 / (on + off);
-  const weightedReturn = parts.reduce((a, p) => a + (p.Alokasi_Persen/100)*(p.Return_Persen/100), 0);
-
-  // Inflation-adjusted FIRE capital: target grows with inflation each year
-  // Real rate = (1 + return) / (1 + inflation) - 1
-  const realReturn   = (1 + weightedReturn) / (1 + inflation) - 1;
-  const fireCapital  = targetPI * 12 * 25; // nominal
-  const fireCapAdj   = targetPI * 12 * (1 / (realReturn > 0 ? realReturn : 0.04)); // sustainable withdrawal at real rate
-
-  // 30-year projection (nominal + inflation-adj comparison)
-  let portfolio = 0, salaryAccum = 0;
-  const proj = [];
-  for (let y = 1; y <= 30; y++) {
-    portfolio    = (portfolio + annualFuel) * (1 + weightedReturn);
-    salaryAccum += annualFuel;
-    const inflAdj = fireCapital * Math.pow(1 + inflation, y);
-    proj.push({
-      year: y,
-      inv: Math.round(portfolio),
-      sal: Math.round(salaryAccum),
-      fire: Math.round(fireCapital),
-      fireAdj: Math.round(inflAdj)
+  for (let y = 1; y <= years; y++) {
+    portfolio = (portfolio + annualSaving) * (1 + weightedReturn);
+    salaryAccum += annualSaving;
+    projectionData.push({
+      year: `Thn ${y}`,
+      Investasi: Math.round(portfolio),
+      GajiSaja: Math.round(salaryAccum),
+      FIRE: Math.round(fireCapital)
     });
   }
 
-  // Contracts to FIRE (inflation-adjusted target)
-  let accum = 0, cnt = 0;
-  while (accum < fireCapAdj && cnt < 1000) {
-    accum = (accum + annualFuel / cPerYear) * (1 + weightedReturn / cPerYear);
-    cnt++;
+  // Voyage duration: how many contracts to reach FIRE
+  let accum = 0;
+  let contractCount = 0;
+  while (accum < fireCapital && contractCount < 500) {
+    accum = (accum + annualSaving / contractsPerYear) * (1 + weightedReturn / contractsPerYear);
+    contractCount++;
   }
 
-  return {
-    on, off, gaji, annualFuel, weightedReturn, fireCapital, fireCapAdj,
-    proj, contractCount: cnt, yearsToFIRE: cnt/cPerYear,
-    parts, targetPI, cPerYear, realReturn, inflation
+  const yearsToFIRE = contractCount / contractsPerYear;
+
+  return { annualFuel, annualSaving, weightedReturn, fireCapital, projectionData, contractCount, yearsToFIRE, parts, targetPI, on, off, gaji };
+}
+
+// ─── VESSEL SVG ───────────────────────────────────────────────────────────────
+function VesselSVG({ parts }) {
+  const getColor = (idx) => {
+    const colors = [GOLD, TEAL, "#A78BFA", "#F472B6", GREEN];
+    return colors[idx % colors.length];
   };
+
+  const engineAlloc = parts[0]?.Alokasi_Persen || 0;
+  const hullAlloc = parts[1]?.Alokasi_Persen || 0;
+  const lifeAlloc = parts[2]?.Alokasi_Persen || 0;
+  const engineColor = parts[0] ? getColor(0) : "#334155";
+  const hullColor = parts[1] ? getColor(1) : "#334155";
+  const lifeColor = parts[2] ? getColor(2) : "#334155";
+
+  return (
+    <svg viewBox="0 0 280 180" xmlns="http://www.w3.org/2000/svg" style={{ width: "100%", maxWidth: 340, filter: "drop-shadow(0 0 24px rgba(197,160,89,0.18))" }}>
+      <defs>
+        <radialGradient id="engineGlow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor={engineColor} stopOpacity="0.7" />
+          <stop offset="100%" stopColor={engineColor} stopOpacity="0" />
+        </radialGradient>
+        <radialGradient id="hullGlow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stopColor={hullColor} stopOpacity="0.5" />
+          <stop offset="100%" stopColor={hullColor} stopOpacity="0" />
+        </radialGradient>
+        <filter id="glow">
+          <feGaussianBlur stdDeviation="2.5" result="coloredBlur" />
+          <feMerge>
+            <feMergeNode in="coloredBlur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+      </defs>
+
+      {/* Water */}
+      <ellipse cx="140" cy="158" rx="120" ry="14" fill="#0D2137" opacity="0.8" />
+      <path d="M20 155 Q60 148 100 155 Q140 162 180 155 Q220 148 260 155" stroke={TEAL} strokeWidth="1.5" fill="none" opacity="0.4" />
+
+      {/* Hull */}
+      <path d="M50 120 L60 145 L220 145 L230 120 Z" fill={hullColor} opacity="0.85" filter="url(#glow)" />
+      <ellipse cx="140" cy="120" rx="80" ry="6" fill={hullColor} opacity="0.4" />
+      <rect x="50" y="112" width="180" height="10" rx="2" fill={hullColor} opacity="0.6" />
+
+      {/* Hull glow overlay */}
+      <ellipse cx="140" cy="135" rx="90" ry="18" fill="url(#hullGlow)" />
+
+      {/* Cabin / Superstructure */}
+      <rect x="90" y="85" width="100" height="35" rx="4" fill="#0F2744" stroke={GOLD} strokeWidth="1.2" />
+      <rect x="100" y="92" width="20" height="14" rx="2" fill={NAVY} stroke={TEAL} strokeWidth="0.8" opacity="0.9" />
+      <rect x="128" y="92" width="20" height="14" rx="2" fill={NAVY} stroke={TEAL} strokeWidth="0.8" opacity="0.9" />
+      <rect x="156" y="92" width="20" height="14" rx="2" fill={NAVY} stroke={TEAL} strokeWidth="0.8" opacity="0.9" />
+
+      {/* Funnel / Engine stack */}
+      <rect x="155" y="60" width="22" height="32" rx="3" fill={engineColor} opacity="0.9" filter="url(#glow)" />
+      <rect x="160" y="52" width="12" height="14" rx="2" fill={engineColor} opacity="0.8" />
+      {/* Smoke */}
+      <circle cx="166" cy="46" r="5" fill={engineColor} opacity={engineAlloc > 30 ? 0.6 : 0.2} />
+      <circle cx="162" cy="38" r="4" fill={engineColor} opacity={engineAlloc > 30 ? 0.4 : 0.1} />
+      <circle cx="169" cy="31" r="3" fill={engineColor} opacity={engineAlloc > 30 ? 0.25 : 0.05} />
+
+      {/* Mast */}
+      <line x1="130" y1="30" x2="130" y2="90" stroke={GOLD} strokeWidth="2" />
+      <line x1="100" y1="50" x2="160" y2="50" stroke={GOLD} strokeWidth="1.2" />
+
+      {/* Flag */}
+      <polygon points="130,30 155,40 130,50" fill={GOLD_LIGHT} opacity="0.9" />
+
+      {/* Lifebuoy */}
+      <circle cx="65" cy="115" r="12" fill="none" stroke={lifeColor} strokeWidth="3.5" filter="url(#glow)" />
+      <circle cx="65" cy="115" r="6" fill={lifeColor} opacity="0.3" />
+      <line x1="65" y1="103" x2="65" y2="108" stroke={lifeColor} strokeWidth="2" />
+      <line x1="65" y1="122" x2="65" y2="127" stroke={lifeColor} strokeWidth="2" />
+      <line x1="53" y1="115" x2="58" y2="115" stroke={lifeColor} strokeWidth="2" />
+      <line x1="72" y1="115" x2="77" y2="115" stroke={lifeColor} strokeWidth="2" />
+
+      {/* Engine glow */}
+      <ellipse cx="166" cy="76" rx="16" ry="24" fill="url(#engineGlow)" />
+
+      {/* Anchor */}
+      <text x="210" y="138" fontSize="14" fill={GOLD} opacity="0.7">⚓</text>
+    </svg>
+  );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// RENDER DASHBOARD
-// ══════════════════════════════════════════════════════════════════════════════
-function renderDashboard(data) {
-  const { fuelCols, partsCols, targetPI, kurs, fileName } = data;
-  const l = L[currentCurrency];
-  const sym = l.symbol;
-
-  // Compute
-  const d = calculate(fuelCols, partsCols, targetPI, inflationRate);
-
-  // Show dashboard
-  document.getElementById('upload-state').style.display = 'none';
-  const dash = document.getElementById('dashboard');
-  dash.style.display = 'block';
-  dash.classList.add('active');
-
-  // Apply i18n to dashboard
-  applyDashboardI18n(l);
-
-  // File info
-  document.getElementById('db-filename').textContent = `📄 ${fileName}`;
-  document.getElementById('db-inflation-val').textContent = `${(inflationRate*100).toFixed(1)}%`;
-  document.getElementById('db-inflation-label').textContent = 'Inflation';
-
-  // FIRE status
-  document.getElementById('stat-contracts').textContent = l.fireContracts(d.contractCount);
-  document.getElementById('stat-years').textContent     = l.fireYears(d.yearsToFIRE);
-
-  const fireYear = d.proj.findIndex(p => p.inv >= d.fireCapAdj);
-  const badgeWrap = document.getElementById('fire-badge-wrap');
-  if (fireYear >= 0) {
-    badgeWrap.innerHTML = `<div class="fire-badge">${l.fireBadge(fireYear+1)}</div>`;
-  } else { badgeWrap.innerHTML = ''; }
-
-  document.getElementById('inflation-note').textContent = l.inflationNote;
-  document.getElementById('inflation-note').style.display = inflationRate > 0 ? 'block' : 'none';
-
-  // Format currency helper
-  const fmt = (v) => {
-    if (currentCurrency === 'IDR') return `Rp ${Math.round(v * kurs).toLocaleString('id-ID')}`;
-    if (currentCurrency === 'PHP') return `₱ ${Math.round(v * (kurs||56)).toLocaleString('en-PH')}`;
-    return `$${Math.round(v).toLocaleString('en-US')}`;
-  };
-  const fmtUSD = (v) => `$${Math.round(v).toLocaleString('en-US')}`;
-
-  document.getElementById('m-fuel').innerHTML   = `${fmt(d.annualFuel)}<span class="metric-sub">${fmtUSD(d.annualFuel)} USD</span>`;
-  document.getElementById('m-fire').innerHTML   = `${fmt(d.fireCapAdj)}<span class="metric-sub">${fmtUSD(d.fireCapAdj)} · inflation-adj</span>`;
-  document.getElementById('m-return').textContent = `${(d.weightedReturn*100).toFixed(2)}%`;
-  document.getElementById('m-target').innerHTML = `${fmt(d.targetPI)}<span class="metric-sub">${fmtUSD(d.targetPI)} USD</span>`;
-
-  // Stats
-  document.getElementById('s-on').textContent   = `${d.on} bln`;
-  document.getElementById('s-off').textContent  = `${d.off} bln`;
-  document.getElementById('s-gaji').textContent = fmtUSD(d.gaji);
-
-  // Vessel colors
-  const c = COLORS;
-  ['v-hull','v-hull2'].forEach(id => { const el = document.getElementById(id); if(el) el.setAttribute('fill',c[1]); });
-  ['v-engine','v-engine2','v-smoke1','v-smoke2','v-smoke3'].forEach(id => { const el = document.getElementById(id); if(el) el.setAttribute('fill',c[0]); });
-  document.getElementById('v-life').setAttribute('stroke', c[2]);
-
-  // Asset legend
-  document.getElementById('asset-legend').innerHTML = d.parts.map((p,i) => `
-    <div class="asset-legend-item">
-      <div style="display:flex;align-items:center;gap:8px">
-        <span class="asset-dot" style="background:${COLORS[i%COLORS.length]};box-shadow:0 0 6px ${COLORS[i%COLORS.length]}"></span>
-        <span style="font-size:12px;color:#8AAABF">${p.Nama_Aset}</span>
-      </div>
-      <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:${COLORS[i%COLORS.length]}">${p.Alokasi_Persen}% @ ${p.Return_Persen}%</span>
-    </div>`).join('');
-
-  // Chart
-  buildChart(d, fireYear, l, fmt);
-
-  // Analytics
-  buildAnalytics(d, l, fmt, fmtUSD);
-
-  // Asset table
-  buildAssetTable(d, l, fmt, fmtUSD);
-
-  // Store for recalc
-  currentData._computed = d;
-  currentData._fmt = fmt;
-  currentData._fmtUSD = fmtUSD;
+// ─── CUSTOM TOOLTIP ──────────────────────────────────────────────────────────
+function CustomTooltip({ active, payload, label }) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div style={{ background: "#0D2137", border: `1px solid ${GOLD}40`, borderRadius: 10, padding: "10px 16px" }}>
+      <p style={{ color: GOLD, fontFamily: "'Playfair Display', serif", marginBottom: 6, fontSize: 13 }}>{label}</p>
+      {payload.map((p) => (
+        <p key={p.name} style={{ color: p.color, fontSize: 12, margin: "2px 0", fontFamily: "monospace" }}>
+          {p.name}: <b>${p.value?.toLocaleString()}</b>
+        </p>
+      ))}
+    </div>
+  );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// APPLY I18N TO DASHBOARD LABELS
-// ══════════════════════════════════════════════════════════════════════════════
-function applyDashboardI18n(l) {
-  const set = (id, html) => { const el = document.getElementById(id); if(el) el.innerHTML = html; };
-  set('btn-detail-text', l.btnDetail);
-  set('btn-change-text', l.btnChange);
-  set('btn-currency-text', l.btnCurrency);
-  set('inflation-label-text', `${l.inflationLabel} <span class="en-hint">(Annual Inflation)</span>`);
-  set('vessel-label', `${l.vesselLabel} <span class="en-hint">(Investment Fleet)</span>`);
-  set('fire-label', `${l.fireLabel} <span class="en-hint">(Journey Remaining)</span>`);
-  set('m-fuel-label', `${l.fuelLabel}<span class="metric-label-en">${l.fuelEn}</span>`);
-  set('m-fire-label', `${l.fireCapLabel}<span class="metric-label-en">${l.fireCapEn}</span>`);
-  set('m-return-label', `${l.returnLabel}<span class="metric-label-en">${l.returnEn}</span>`);
-  set('m-target-label', `${l.targetLabel}<span class="metric-label-en">${l.targetEn}</span>`);
-  set('s-on-label', l.onLabel);
-  set('s-off-label', l.offLabel);
-  set('s-gaji-label', l.gajiLabel);
-  set('s-on-unit', l.perContract);
-  set('s-off-unit', l.perContract);
-  set('s-gaji-unit', l.perMonth);
-  set('chart-label', `📈 ${l.chartLabel} <span class="en-hint">— Wealth Projection</span>`);
-  set('analytics-label', l.analyticsLabel);
-  set('analytics-sub', l.analyticsSub);
-  set('fuel-formula-label', l.fuelFormulaLabel);
-  set('growth-label', l.growthLabel);
-  set('manifest-label', `📋 ${l.manifestLabel} <span class="en-hint">— Vessel Parts</span>`);
-  set('at-name', l.atName); set('at-alloc', l.atAlloc); set('at-return', l.atReturn); set('at-annual', l.atAnnual);
-  set('gt-year', l.gtYear); set('gt-saving', l.gtSaving); set('gt-portfolio', l.gtPortfolio); set('gt-gap', l.gtGap); set('gt-status', l.gtStatus);
-  set('wrt-asset', l.wrtAsset); set('wrt-alloc', l.wrtAlloc); set('wrt-return', l.wrtReturn); set('wrt-contrib', l.wrtContrib);
-  set('show-more-btn', l.showMore);
-}
+// ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
+export default function TheGreatVoyage() {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+  const [dragging, setDragging] = useState(false);
+  const [fileName, setFileName] = useState(null);
+  const fileRef = useRef();
 
-// ══════════════════════════════════════════════════════════════════════════════
-// CHART
-// ══════════════════════════════════════════════════════════════════════════════
-function buildChart(d, fireYear, l, fmt) {
-  if (chartInstance) { chartInstance.destroy(); chartInstance = null; }
-  const ctx = document.getElementById('voyage-chart').getContext('2d');
-  const even = d.proj.filter((_,i) => i%2===0 || i===29);
-  chartInstance = new Chart(ctx, {
-    type:'line',
-    data:{
-      labels: even.map(p=>`Y${p.year}`),
-      datasets:[
-        { label: l.chartLabel.replace('📈 ',''), data: even.map(p=>p.inv),     borderColor:'#C5A059', backgroundColor:'rgba(197,160,89,.12)', borderWidth:2.5, fill:true, tension:.4, pointRadius:0 },
-        { label: 'Salary Only',                  data: even.map(p=>p.sal),     borderColor:'#2DD4BF', backgroundColor:'rgba(45,212,191,.06)',  borderWidth:2,   borderDash:[6,4], fill:true, tension:.4, pointRadius:0 },
-        { label: 'FIRE Target (adj)',             data: even.map(p=>p.fireAdj), borderColor:'#EF4444', backgroundColor:'transparent',           borderWidth:1.5, borderDash:[4,4], fill:false, tension:0, pointRadius:0 },
-      ]
-    },
-    options:{
-      responsive:true, maintainAspectRatio:false,
-      interaction:{mode:'index',intersect:false},
-      plugins:{
-        legend:{ labels:{ color:'#8AAABF', font:{family:"'Lato',sans-serif",size:11}, boxWidth:18, padding:14 } },
-        tooltip:{
-          backgroundColor:'#0D2137', borderColor:'rgba(197,160,89,.4)', borderWidth:1,
-          titleColor:'#C5A059', bodyColor:'#C8D8E8',
-          titleFont:{family:"'Playfair Display',serif",size:13},
-          callbacks:{ label: ctx => `${ctx.dataset.label}: $${ctx.parsed.y.toLocaleString()}` }
+  const parseFile = useCallback((file) => {
+    setError(null);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const wb = XLSX.read(e.target.result, { type: "array" });
+
+        // Validate sheets
+        const missingSheets = [];
+        if (!wb.SheetNames.includes("Fueling")) missingSheets.push("Fueling");
+        if (!wb.SheetNames.includes("VesselParts")) missingSheets.push("VesselParts");
+        if (!wb.SheetNames.includes("Target")) missingSheets.push("Target");
+        if (missingSheets.length) {
+          setError(`Sheet tidak ditemukan: ${missingSheets.join(", ")}. Gunakan template yang disediakan.`);
+          return;
         }
-      },
-      scales:{
-        x:{ grid:{color:'rgba(26,58,90,.5)'}, ticks:{color:'#4A7A9B',font:{size:10}} },
-        y:{ grid:{color:'rgba(26,58,90,.4)'}, ticks:{color:'#4A7A9B',font:{size:10}, callback:v=>v>=1e6?`$${(v/1e6).toFixed(1)}M`:`$${(v/1e3).toFixed(0)}K`} }
+
+        const fuelSheet = XLSX.utils.sheet_to_json(wb.Sheets["Fueling"]);
+        const partsSheet = XLSX.utils.sheet_to_json(wb.Sheets["VesselParts"]);
+        const targetSheet = XLSX.utils.sheet_to_json(wb.Sheets["Target"]);
+
+        // Validate columns
+        const fuelRow = fuelSheet[0] || {};
+        const missingFuel = REQUIRED_FUEL_COLS.filter(c => !(c in fuelRow));
+        if (missingFuel.length) { setError(`Kolom hilang di sheet Fueling: ${missingFuel.join(", ")}`); return; }
+
+        const partRow = partsSheet[0] || {};
+        const missingParts = REQUIRED_PARTS_COLS.filter(c => !(c in partRow));
+        if (missingParts.length) { setError(`Kolom hilang di sheet VesselParts: ${missingParts.join(", ")}`); return; }
+
+        const targetRow = targetSheet[0] || {};
+        if (!("Target_Passive_Income" in targetRow)) { setError("Kolom Target_Passive_Income tidak ditemukan di sheet Target."); return; }
+
+        const parts = partsSheet.map(r => ({
+          Nama_Aset: r.Nama_Aset,
+          Alokasi_Persen: Number(r.Alokasi_Persen),
+          Return_Persen: Number(r.Return_Persen)
+        }));
+
+        const result = calculate(fuelRow, parts, targetRow);
+        setData(result);
+        setFileName(file.name);
+      } catch (err) {
+        setError("Gagal membaca file. Pastikan format Excel valid.");
       }
-    }
-  });
+    };
+    reader.readAsArrayBuffer(file);
+  }, []);
 
-  const note = document.getElementById('fire-chart-note');
-  if (fireYear >= 0) { note.textContent = l.fireChartNote(fireYear+1); note.style.display = 'block'; }
-  else { note.style.display = 'none'; }
-}
+  const handleDrop = useCallback((e) => {
+    e.preventDefault();
+    setDragging(false);
+    const file = e.dataTransfer.files[0];
+    if (file) parseFile(file);
+  }, [parseFile]);
 
-// ══════════════════════════════════════════════════════════════════════════════
-// ANALYTICS / TRANSPARENCY
-// ══════════════════════════════════════════════════════════════════════════════
-function buildAnalytics(d, l, fmt, fmtUSD) {
-  // Fuel formula
-  document.getElementById('fuel-formula-box').innerHTML =
-`<span style="color:var(--gold-l)">Annual Fuel</span> = (Gaji × On) − (Biaya_Laut × On) − (Biaya_Darat × Off)
-<span class="formula-comment">             = ($${d.gaji} × ${d.on}) − ($${d.fuelCols?.biayaL||0} × ${d.on}) − ($${d.fuelCols?.biayaD||0} × ${d.off})</span>
-<span style="color:var(--teal)">             = ${fmtUSD(d.annualFuel)} / year</span>`;
+  const handleFileChange = (e) => {
+    const file = e.target.files[0];
+    if (file) parseFile(file);
+  };
 
-  // WR formula
-  let wrLines = d.parts.map((p,i) => {
-    const contrib = (p.Alokasi_Persen/100)*(p.Return_Persen/100)*100;
-    return `<span style="color:${COLORS[i%COLORS.length]}">${p.Nama_Aset}</span>: ${p.Alokasi_Persen}% × ${p.Return_Persen}% = <b>${contrib.toFixed(3)}%</b>`;
-  }).join('\n');
-  document.getElementById('wr-formula-box').innerHTML =
-`${wrLines}
-<span style="color:var(--gold-l)">Weighted Return = <b>${(d.weightedReturn*100).toFixed(3)}%</b></span>
-<span class="formula-comment">Real Return (inflation-adj) = ${(d.realReturn*100).toFixed(3)}%</span>`;
+  // ── EMPTY STATE ─────────────────────────────────────────────────────────────
+  if (!data) {
+    return (
+      <div style={{
+        minHeight: "100vh", background: NAVY,
+        fontFamily: "'Georgia', 'Times New Roman', serif",
+        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+        padding: "40px 20px", position: "relative", overflow: "hidden"
+      }}>
+        {/* Background decoration */}
+        <div style={{
+          position: "absolute", inset: 0, opacity: 0.04,
+          backgroundImage: `radial-gradient(circle at 20% 50%, ${GOLD} 0%, transparent 50%),
+                            radial-gradient(circle at 80% 20%, ${TEAL} 0%, transparent 40%)`,
+          pointerEvents: "none"
+        }} />
 
-  // WR table
-  document.getElementById('wr-tbody').innerHTML = d.parts.map((p,i) => {
-    const contrib = (p.Alokasi_Persen/100)*(p.Return_Persen/100)*100;
-    return `<tr>
-      <td><span class="asset-dot" style="background:${COLORS[i%COLORS.length]}"></span>${p.Nama_Aset}</td>
-      <td style="color:${COLORS[i%COLORS.length]}">${p.Alokasi_Persen}%</td>
-      <td style="color:var(--teal)">${p.Return_Persen}%</td>
-      <td style="color:var(--gold)">${contrib.toFixed(3)}%</td>
-    </tr>`;
-  }).join('');
+        {/* Compass decoration */}
+        <div style={{ fontSize: 56, marginBottom: 8, filter: `drop-shadow(0 0 20px ${GOLD}60)` }}>🧭</div>
 
-  // Growth table
-  buildGrowthTable(d, l, fmt, fmtUSD);
-}
+        <h1 style={{
+          fontFamily: "'Playfair Display', 'Georgia', serif",
+          color: GOLD_LIGHT, fontSize: "clamp(28px, 5vw, 48px)",
+          textAlign: "center", margin: "0 0 8px",
+          textShadow: `0 0 40px ${GOLD}50`, letterSpacing: "0.05em"
+        }}>
+          The Great Voyage
+        </h1>
+        <p style={{ color: "#7A9AB5", fontSize: 15, textAlign: "center", marginBottom: 48, maxWidth: 420, lineHeight: 1.7 }}>
+          Navigasi menuju kebebasan finansial. Upload Logbook Excel-mu untuk memulai pelayaran.
+        </p>
 
-let _growthD, _growthL, _growthFmt, _growthFmtUSD;
-function buildGrowthTable(d, l, fmt, fmtUSD) {
-  _growthD = d; _growthL = l; _growthFmt = fmt; _growthFmtUSD = fmtUSD;
-  growthExpanded = false;
-  renderGrowthRows();
-}
-
-function renderGrowthRows() {
-  const d = _growthD, l = _growthL, fmt = _growthFmt;
-  const rows = growthExpanded ? d.proj : d.proj.slice(0,10);
-  document.getElementById('growth-tbody').innerHTML = rows.map(p => {
-    const gap     = Math.max(0, d.fireCapAdj - p.inv);
-    const reached = p.inv >= d.fireCapAdj;
-    return `<tr>
-      <td style="color:var(--muted)">${p.year}</td>
-      <td style="color:var(--text)">$${p.sal.toLocaleString()}</td>
-      <td style="color:${reached?'var(--green)':'var(--gold)'}${reached?' font-weight:700':''}"}>$${p.inv.toLocaleString()}</td>
-      <td style="color:${reached?'var(--green)':'var(--red)'}">$${gap.toLocaleString()}</td>
-      <td class="${reached?'year-fire':''}">${reached?'🎯 FIRE!':'⛵'}</td>
-    </tr>`;
-  }).join('');
-  document.getElementById('show-more-btn').textContent = growthExpanded ? l.showLess : l.showMore;
-}
-
-function toggleGrowthTable() {
-  growthExpanded = !growthExpanded;
-  renderGrowthRows();
-}
-
-function toggleAnalytics() {
-  const body = document.getElementById('analytics-body');
-  const tog  = document.getElementById('analytics-toggle');
-  body.classList.toggle('open');
-  tog.classList.toggle('open');
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// ASSET TABLE
-// ══════════════════════════════════════════════════════════════════════════════
-function buildAssetTable(d, l, fmt, fmtUSD) {
-  document.getElementById('asset-tbody').innerHTML = d.parts.map((p,i) => {
-    const alloc = d.annualFuel * (p.Alokasi_Persen/100);
-    return `<tr>
-      <td><span class="asset-dot" style="background:${COLORS[i%COLORS.length]};box-shadow:0 0 5px ${COLORS[i%COLORS.length]}"></span><span style="color:var(--text)">${p.Nama_Aset}</span></td>
-      <td style="font-family:'JetBrains Mono',monospace;color:${COLORS[i%COLORS.length]}">${p.Alokasi_Persen}%</td>
-      <td style="font-family:'JetBrains Mono',monospace;color:var(--muted)">${p.Return_Persen}%</td>
-      <td style="font-family:'JetBrains Mono',monospace;color:var(--gold-l)">${fmtUSD(alloc)}<span style="font-size:10px;color:var(--muted);display:block">${fmt(alloc)}</span></td>
-    </tr>`;
-  }).join('');
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// INFLATION SLIDER
-// ══════════════════════════════════════════════════════════════════════════════
-function onInflationChange(val) {
-  inflationRate = parseFloat(val) / 100;
-  document.getElementById('inflation-display').textContent = `${parseFloat(val).toFixed(1)}%`;
-  document.getElementById('db-inflation-val').textContent = `${parseFloat(val).toFixed(1)}%`;
-  if (currentData) renderDashboard(currentData);
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// DETAIL MODAL
-// ══════════════════════════════════════════════════════════════════════════════
-function openDetailModal() {
-  const l = L[currentCurrency];
-  const d = currentData?._computed;
-  const fmt = currentData?._fmt;
-  const fmtUSD = currentData?._fmtUSD;
-  if (!d) return;
-
-  document.getElementById('detail-modal-title').textContent = l.detailTitle;
-  document.getElementById('detail-modal-body').innerHTML = `
-    <div style="display:flex;flex-direction:column;gap:16px">
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.15em;color:var(--muted);margin-bottom:10px">⛽ Annual Fuel Breakdown</div>
-        <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--teal);line-height:2">
-          Gaji × On: $${d.gaji} × ${d.on} = <b>$${(d.gaji*d.on).toLocaleString()}</b><br>
-          Biaya Laut × On: $${currentData.fuelCols.biayaL} × ${d.on} = <b style="color:var(--red)">−$${(currentData.fuelCols.biayaL*d.on).toLocaleString()}</b><br>
-          Biaya Darat × Off: $${currentData.fuelCols.biayaD} × ${d.off} = <b style="color:var(--red)">−$${(currentData.fuelCols.biayaD*d.off).toLocaleString()}</b><br>
-          <span style="border-top:1px solid var(--border);display:block;padding-top:8px;margin-top:4px;color:var(--gold)">Annual Fuel = <b>${fmtUSD(d.annualFuel)}</b> = <b>${fmt(d.annualFuel)}</b></span>
+        {/* Drop Zone */}
+        <div
+          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
+          onDragLeave={() => setDragging(false)}
+          onDrop={handleDrop}
+          onClick={() => fileRef.current?.click()}
+          style={{
+            width: "100%", maxWidth: 420, border: `2px dashed ${dragging ? GOLD : "#2A4A6B"}`,
+            borderRadius: 16, padding: "48px 32px", textAlign: "center", cursor: "pointer",
+            background: dragging ? `${GOLD}08` : `${NAVY2}80`,
+            transition: "all 0.3s ease",
+            boxShadow: dragging ? `0 0 40px ${GOLD}30` : "none"
+          }}
+        >
+          <Upload size={36} color={dragging ? GOLD : "#4A7A9B"} style={{ marginBottom: 16, display: "block", margin: "0 auto 16px" }} />
+          <p style={{ color: dragging ? GOLD_LIGHT : "#7A9AB5", fontSize: 15, margin: 0 }}>
+            {dragging ? "Lepaskan untuk upload..." : "Drag & drop file Excel di sini, atau klik untuk memilih"}
+          </p>
+          <p style={{ color: "#3A6A8A", fontSize: 12, marginTop: 8 }}>Mendukung: .xlsx, .xls</p>
         </div>
+        <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleFileChange} style={{ display: "none" }} />
+
+        {/* Error */}
+        {error && (
+          <div style={{
+            marginTop: 20, padding: "14px 20px", borderRadius: 10,
+            background: `${RED}15`, border: `1px solid ${RED}50`,
+            display: "flex", alignItems: "flex-start", gap: 10, maxWidth: 420, width: "100%"
+          }}>
+            <AlertTriangle size={18} color={RED} style={{ flexShrink: 0, marginTop: 2 }} />
+            <p style={{ color: "#FCA5A5", fontSize: 13, margin: 0, lineHeight: 1.6 }}>{error}</p>
+          </div>
+        )}
+
+        {/* Download Template */}
+        <button
+          onClick={downloadTemplate}
+          style={{
+            marginTop: 28, display: "flex", alignItems: "center", gap: 8,
+            background: "transparent", border: `1px solid ${GOLD}60`,
+            color: GOLD, padding: "12px 24px", borderRadius: 8, cursor: "pointer",
+            fontSize: 14, fontFamily: "inherit", transition: "all 0.2s",
+            letterSpacing: "0.05em"
+          }}
+          onMouseEnter={e => { e.currentTarget.style.background = `${GOLD}15`; e.currentTarget.style.borderColor = GOLD; }}
+          onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = `${GOLD}60`; }}
+        >
+          <Download size={16} />
+          Download Template Logbook
+        </button>
       </div>
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.15em;color:var(--muted);margin-bottom:10px">🎯 FIRE Capital (Inflation-Adjusted)</div>
-        <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--teal);line-height:2">
-          Nominal (Target × 12 × 25): <b>${fmtUSD(d.fireCapital)}</b><br>
-          Inflation Rate: <b style="color:var(--red)">${(d.inflation*100).toFixed(1)}%</b><br>
-          Real Return: <b style="color:var(--purple)">${(d.realReturn*100).toFixed(3)}%</b><br>
-          <span style="border-top:1px solid var(--border);display:block;padding-top:8px;margin-top:4px;color:var(--gold)">Adjusted FIRE Capital = <b>${fmtUSD(d.fireCapAdj)}</b></span>
+    );
+  }
+
+  // ── DASHBOARD STATE ─────────────────────────────────────────────────────────
+  const {
+    annualFuel, annualSaving, weightedReturn, fireCapital,
+    projectionData, contractCount, yearsToFIRE,
+    parts, targetPI, on, off, gaji
+  } = data;
+
+  const fireYear = projectionData.findIndex(d => d.Investasi >= fireCapital);
+  const fireReached = fireYear >= 0;
+
+  const getColor = (idx) => {
+    const colors = [GOLD, TEAL, "#A78BFA", "#F472B6", GREEN];
+    return colors[idx % colors.length];
+  };
+
+  return (
+    <div style={{
+      minHeight: "100vh", background: NAVY,
+      fontFamily: "'Georgia', 'Times New Roman', serif",
+      color: "#C8D8E8", padding: "24px 16px"
+    }}>
+      {/* ── HEADER */}
+      <div style={{ textAlign: "center", marginBottom: 32, position: "relative" }}>
+        <p style={{ color: "#4A7A9B", fontSize: 12, letterSpacing: "0.2em", marginBottom: 4, textTransform: "uppercase" }}>
+          Logbook: {fileName}
+        </p>
+        <h1 style={{
+          fontFamily: "'Playfair Display', 'Georgia', serif",
+          color: GOLD_LIGHT, fontSize: "clamp(22px, 4vw, 36px)",
+          margin: 0, textShadow: `0 0 30px ${GOLD}40`
+        }}>
+          ⚓ The Great Voyage
+        </h1>
+        <button
+          onClick={() => { setData(null); setError(null); setFileName(null); }}
+          style={{
+            position: "absolute", right: 0, top: "50%", transform: "translateY(-50%)",
+            background: "transparent", border: `1px solid #2A4A6B`,
+            color: "#4A7A9B", padding: "6px 14px", borderRadius: 6,
+            cursor: "pointer", fontSize: 12, fontFamily: "inherit"
+          }}
+        >
+          Ganti File
+        </button>
+      </div>
+
+      <div style={{ maxWidth: 960, margin: "0 auto" }}>
+
+        {/* ── ROW 1: VESSEL + STATUS */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
+
+          {/* Vessel Visual */}
+          <div style={{
+            background: `${NAVY2}CC`, border: `1px solid ${GOLD}25`,
+            borderRadius: 16, padding: "24px 16px", display: "flex",
+            flexDirection: "column", alignItems: "center"
+          }}>
+            <p style={{ color: GOLD, fontSize: 12, letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 12, margin: "0 0 12px" }}>
+              Armada Investasi
+            </p>
+            <VesselSVG parts={parts} />
+            <div style={{ width: "100%", marginTop: 16, display: "flex", flexDirection: "column", gap: 6 }}>
+              {parts.map((p, i) => (
+                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: getColor(i), boxShadow: `0 0 6px ${getColor(i)}` }} />
+                    <span style={{ fontSize: 12, color: "#8AAABF" }}>{p.Nama_Aset}</span>
+                  </div>
+                  <span style={{ fontSize: 12, color: getColor(i), fontFamily: "monospace" }}>
+                    {p.Alokasi_Persen}% @ {p.Return_Persen}%
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Status Panel */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+            {/* FIRE Status */}
+            <div style={{
+              background: fireReached ? `${GREEN}10` : `${GOLD}08`,
+              border: `1px solid ${fireReached ? GREEN : GOLD}40`,
+              borderRadius: 14, padding: "18px 20px", flex: 1
+            }}>
+              <p style={{ color: "#6A9AB5", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.15em", margin: "0 0 6px" }}>
+                Sisa Perjalanan
+              </p>
+              <p style={{
+                fontFamily: "'Playfair Display', serif",
+                color: fireReached ? GREEN : GOLD_LIGHT,
+                fontSize: "clamp(24px, 4vw, 36px)", margin: "0 0 4px",
+                textShadow: `0 0 20px ${fireReached ? GREEN : GOLD}50`
+              }}>
+                {contractCount} Kontrak
+              </p>
+              <p style={{ color: "#6A9AB5", fontSize: 13, margin: 0 }}>
+                ≈ {yearsToFIRE.toFixed(1)} tahun menuju FIRE
+              </p>
+            </div>
+
+            {/* Key Metrics */}
+            {[
+              { label: "Annual Fuel (Tabungan/Thn)", value: `$${annualFuel.toLocaleString()}`, color: GOLD },
+              { label: "Modal FIRE (Target × 25)", value: `$${fireCapital.toLocaleString()}`, color: TEAL },
+              { label: "Weighted Return", value: `${(weightedReturn * 100).toFixed(2)}%`, color: "#A78BFA" },
+              { label: "Target Passive Income/Bln", value: `$${targetPI.toLocaleString()}`, color: GREEN },
+            ].map((m, i) => (
+              <div key={i} style={{
+                background: `${NAVY2}CC`, border: `1px solid #1A3A5A`,
+                borderRadius: 10, padding: "12px 16px",
+                display: "flex", justifyContent: "space-between", alignItems: "center"
+              }}>
+                <span style={{ fontSize: 12, color: "#6A9AB5" }}>{m.label}</span>
+                <span style={{ fontFamily: "monospace", fontWeight: "bold", color: m.color, fontSize: 15 }}>{m.value}</span>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
-      <div style="background:var(--card);border:1px solid var(--border);border-radius:10px;padding:16px">
-        <div style="font-size:10px;text-transform:uppercase;letter-spacing:.15em;color:var(--muted);margin-bottom:10px">⚓ Voyage Summary</div>
-        <div style="font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--text);line-height:2.2">
-          Contracts/Year: <b style="color:var(--gold)">${d.cPerYear.toFixed(2)}</b><br>
-          Weighted Return: <b style="color:var(--purple)">${(d.weightedReturn*100).toFixed(3)}%</b><br>
-          Years to FIRE: <b style="color:var(--teal)">${d.yearsToFIRE.toFixed(1)}</b><br>
-          Total Contracts: <b style="color:var(--gold-l)">${d.contractCount}</b>
+
+        {/* ── ROW 2: CONTRACT STATS */}
+        <div style={{
+          display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20
+        }}>
+          {[
+            { icon: "⚡", label: "Bulan On-Board", value: `${on} bln`, sub: "per kontrak" },
+            { icon: "🏠", label: "Bulan Off-Board", value: `${off} bln`, sub: "per kontrak" },
+            { icon: "💰", label: "Gaji Laut/Bln", value: `$${Number(gaji).toLocaleString()}`, sub: "gross" },
+          ].map((s, i) => (
+            <div key={i} style={{
+              background: `${NAVY2}CC`, border: `1px solid ${GOLD}20`,
+              borderRadius: 12, padding: "16px", textAlign: "center"
+            }}>
+              <div style={{ fontSize: 22, marginBottom: 8 }}>{s.icon}</div>
+              <p style={{ color: "#6A9AB5", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", margin: "0 0 4px" }}>{s.label}</p>
+              <p style={{ fontFamily: "monospace", color: GOLD_LIGHT, fontSize: 20, margin: "0 0 2px", fontWeight: "bold" }}>{s.value}</p>
+              <p style={{ color: "#4A6A7A", fontSize: 11, margin: 0 }}>{s.sub}</p>
+            </div>
+          ))}
         </div>
+
+        {/* ── ROW 3: PROJECTION CHART */}
+        <div style={{
+          background: `${NAVY2}CC`, border: `1px solid ${GOLD}25`,
+          borderRadius: 16, padding: "24px 16px 16px", marginBottom: 20
+        }}>
+          <p style={{ color: GOLD, fontSize: 12, letterSpacing: "0.15em", textTransform: "uppercase", margin: "0 0 20px", paddingLeft: 8 }}>
+            Proyeksi Pelayaran — Jalur Investasi vs Gaji Saja
+          </p>
+          <ResponsiveContainer width="100%" height={260}>
+            <AreaChart data={projectionData.filter((_, i) => i % 2 === 0 || i === projectionData.length - 1)} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+              <defs>
+                <linearGradient id="gradInv" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={GOLD} stopOpacity={0.3} />
+                  <stop offset="95%" stopColor={GOLD} stopOpacity={0} />
+                </linearGradient>
+                <linearGradient id="gradSal" x1="0" y1="0" x2="0" y2="1">
+                  <stop offset="5%" stopColor={TEAL} stopOpacity={0.2} />
+                  <stop offset="95%" stopColor={TEAL} stopOpacity={0} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid strokeDasharray="3 3" stroke="#1A3A5A" />
+              <XAxis dataKey="year" tick={{ fill: "#4A7A9B", fontSize: 11 }} axisLine={false} tickLine={false} />
+              <YAxis tick={{ fill: "#4A7A9B", fontSize: 10 }} axisLine={false} tickLine={false}
+                tickFormatter={v => v >= 1000000 ? `$${(v / 1000000).toFixed(1)}M` : `$${(v / 1000).toFixed(0)}K`} />
+              <Tooltip content={<CustomTooltip />} />
+              <Legend wrapperStyle={{ color: "#8AAABF", fontSize: 12 }} />
+              <Area type="monotone" dataKey="GajiSaja" name="Jalur Gaji Saja" stroke={TEAL} fill="url(#gradSal)" strokeWidth={2} dot={false} strokeDasharray="5 3" />
+              <Area type="monotone" dataKey="Investasi" name="Jalur Investasi" stroke={GOLD} fill="url(#gradInv)" strokeWidth={2.5} dot={false} />
+              {fireReached && (
+                <Area type="monotone" dataKey="FIRE" name="Target FIRE" stroke={RED} fill="none" strokeWidth={1.5} strokeDasharray="4 4" dot={false} />
+              )}
+            </AreaChart>
+          </ResponsiveContainer>
+          {fireReached && (
+            <p style={{ textAlign: "center", color: GREEN, fontSize: 13, marginTop: 12, fontFamily: "inherit" }}>
+              🎯 FIRE tercapai di sekitar <b>Tahun {fireYear + 1}</b> dengan jalur investasi
+            </p>
+          )}
+        </div>
+
+        {/* ── ROW 4: ASSET ALLOCATION TABLE */}
+        <div style={{
+          background: `${NAVY2}CC`, border: `1px solid ${GOLD}25`,
+          borderRadius: 16, padding: "20px"
+        }}>
+          <p style={{ color: GOLD, fontSize: 12, letterSpacing: "0.15em", textTransform: "uppercase", margin: "0 0 16px" }}>
+            Manifest Aset — Vessel Parts
+          </p>
+          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+            <thead>
+              <tr>
+                {["Nama Aset", "Alokasi", "Return/Thn", "Annual Fuel → Aset"].map(h => (
+                  <th key={h} style={{ textAlign: "left", color: "#4A7A9B", fontWeight: "normal", paddingBottom: 10, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", borderBottom: `1px solid #1A3A5A` }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {parts.map((p, i) => {
+                const allocated = annualSaving * (p.Alokasi_Persen / 100);
+                return (
+                  <tr key={i} style={{ borderBottom: `1px solid #1A3A5A22` }}>
+                    <td style={{ padding: "10px 0", display: "flex", alignItems: "center", gap: 8 }}>
+                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: getColor(i), flexShrink: 0 }} />
+                      <span style={{ color: "#C8D8E8" }}>{p.Nama_Aset}</span>
+                    </td>
+                    <td style={{ color: getColor(i), fontFamily: "monospace" }}>{p.Alokasi_Persen}%</td>
+                    <td style={{ color: "#8AAABF", fontFamily: "monospace" }}>{p.Return_Persen}%</td>
+                    <td style={{ color: GOLD_LIGHT, fontFamily: "monospace" }}>${allocated.toLocaleString(undefined, { maximumFractionDigits: 0 })}/thn</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+
+        {/* Footer */}
+        <p style={{ textAlign: "center", color: "#2A4A6A", fontSize: 11, marginTop: 24, letterSpacing: "0.1em" }}>
+          THE GREAT VOYAGE · SEAFARER WEALTH NAVIGATOR · DATA DRIVEN BY YOUR LOGBOOK
+        </p>
       </div>
-    </div>`;
-  document.getElementById('detail-modal').classList.add('open');
+    </div>
+  );
 }
-function closeDetailModal() {
-  document.getElementById('detail-modal').classList.remove('open');
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// CHANGELOG
-// ══════════════════════════════════════════════════════════════════════════════
-function toggleChangelog() {
-  document.getElementById('changelog-modal').classList.toggle('open');
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// DYNAMIC EXCEL TEMPLATE
-// ══════════════════════════════════════════════════════════════════════════════
-function downloadTemplate() {
-  const l = L[currentCurrency];
-  const h = l.excelHeaders;
-  const wb = XLSX.utils.book_new();
-
-  // Fueling
-  const fuel = [{}];
-  fuel[0][h.bulanOn]  = 8;
-  fuel[0][h.bulanOff] = 4;
-  fuel[0][h.gajiLaut] = 3000;
-  fuel[0][h.biayaLaut]= 500;
-  fuel[0][h.biayaDarat]= 800;
-  fuel[0][h.kurs]      = currentCurrency==='IDR'?16000:currentCurrency==='PHP'?56:1;
-
-  // VesselParts
-  const parts = [
-    { [h.namaAset]:'Saham / Stock', [h.alokasiPersen]:40, [h.returnPersen]:8 },
-    { [h.namaAset]:'Obligasi / Bond', [h.alokasiPersen]:30, [h.returnPersen]:6 },
-    { [h.namaAset]:'REITs / Properti', [h.alokasiPersen]:20, [h.returnPersen]:7 },
-    { [h.namaAset]:'Deposito / Savings', [h.alokasiPersen]:10, [h.returnPersen]:5 },
-  ];
-
-  // Target
-  const target = [{}];
-  target[0][h.targetPI] = 2000;
-  target[0][h.kursTarget] = currentCurrency==='IDR'?16000:currentCurrency==='PHP'?56:1;
-
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(fuel),   'Fueling');
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(parts),  'VesselParts');
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(target), 'Target');
-  XLSX.writeFile(wb, `GreatVoyage_Template_${currentCurrency}.xlsx`);
-}
-
-// ══════════════════════════════════════════════════════════════════════════════
-// INIT
-// ══════════════════════════════════════════════════════════════════════════════
-buildStars();
-document.getElementById('inflation-slider').value = 4;
-</script>
-
-<!-- PWA Service Worker Registration -->
-<script>
-if ('serviceWorker' in navigator) {
-  window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/sw.js').catch(() => {});
-  });
-}
-</script>
-
-</body>
-</html>
