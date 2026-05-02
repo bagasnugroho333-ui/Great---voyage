@@ -1,567 +1,1161 @@
-import { useState, useCallback, useRef } from "react";
-import * as XLSX from "xlsx";
-import {
-  AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
-} from "recharts";
-import { Anchor, AlertTriangle, Download, Upload, Wind, Compass } from "lucide-react";
-
-// ─── CONSTANTS ────────────────────────────────────────────────────────────────
-const NAVY = "#0A192F";
-const NAVY2 = "#0D2137";
-const GOLD = "#C5A059";
-const GOLD_LIGHT = "#E8C97A";
-const TEAL = "#2DD4BF";
-const RED = "#EF4444";
-const GREEN = "#22C55E";
-
-const REQUIRED_FUEL_COLS = ["Bulan_On", "Bulan_Off", "Gaji_Laut", "Biaya_Laut", "Biaya_Darat"];
-const REQUIRED_PARTS_COLS = ["Nama_Aset", "Alokasi_Persen", "Return_Persen"];
-const REQUIRED_TARGET_COLS = ["Target_Passive_Income"];
-
-// ─── TEMPLATE GENERATOR ──────────────────────────────────────────────────────
-function downloadTemplate() {
-  const wb = XLSX.utils.book_new();
-
-  const fuelData = [
-    { Bulan_On: 8, Bulan_Off: 4, Gaji_Laut: 3000, Biaya_Laut: 500, Biaya_Darat: 800 }
-  ];
-  const partsData = [
-    { Nama_Aset: "Saham Dividen", Alokasi_Persen: 40, Return_Persen: 8 },
-    { Nama_Aset: "Obligasi/Sukuk", Alokasi_Persen: 30, Return_Persen: 6 },
-    { Nama_Aset: "REITs", Alokasi_Persen: 20, Return_Persen: 7 },
-    { Nama_Aset: "Deposito", Alokasi_Persen: 10, Return_Persen: 5 }
-  ];
-  const targetData = [{ Target_Passive_Income: 2000 }];
-
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(fuelData), "Fueling");
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(partsData), "VesselParts");
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(targetData), "Target");
-
-  XLSX.writeFile(wb, "GreatVoyage_Logbook_Template.xlsx");
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<meta name="theme-color" content="#00003A"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<title>The Great Voyage v4.0</title>
+<link rel="manifest" href="manifest.json"/>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>⚓</text></svg>"/>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@400;600;700;900&family=Crimson+Text:ital,wght@0,400;0,600;1,400&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet"/>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<style>
+/* ═══════════════════════════════════════
+   DESIGN TOKENS — Navy & Gold Nautical
+═══════════════════════════════════════ */
+:root{
+  --navy-ink:   #00003A;
+  --navy:       #000080;
+  --navy-mid:   #00005A;
+  --navy-card:  #050540;
+  --gold:       #FFD700;
+  --gold-mid:   #C8A800;
+  --gold-dark:  #8A6A00;
+  --gold-pale:  #FFF5A0;
+  --gold-cream: #FFFDE7;
+  --teal:       #00C8B4;
+  --green:      #00C853;
+  --red:        #FF1744;
+  --white:      #FFFFFF;
+  --parchment:  #F5F0E8;
+  --muted:      #8090B0;
+  --border:     #0A1A5A;
+  --input-bg:   #FFFDE7;
+  --input-bdr:  #FFD700;
+  --r:          12px;
+  --r-sm:       8px;
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth}
+body{
+  background:var(--navy-ink);
+  color:var(--parchment);
+  font-family:'Crimson Text',Georgia,serif;
+  min-height:100vh;
+  overflow-x:hidden;
 }
 
-// ─── CALCULATION ENGINE ──────────────────────────────────────────────────────
-function calculate(fuelRow, parts, targetRow) {
-  const { Bulan_On: on, Bulan_Off: off, Gaji_Laut: gaji, Biaya_Laut: biayaLaut, Biaya_Darat: biayaDarat } = fuelRow;
-  const { Target_Passive_Income: targetPI } = targetRow;
+/* ── Canvas stars ── */
+#bg-canvas{position:fixed;inset:0;pointer-events:none;z-index:0}
 
-  const annualFuel = (gaji * on) - (biayaLaut * on) - (biayaDarat * off);
-  const totalMonths = on + off;
-  const contractsPerYear = 12 / totalMonths;
-  const annualSaving = annualFuel;
+/* ── Shells ── */
+#app{position:relative;z-index:1}
+.page{min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:40px 20px;text-align:center}
+.hide{display:none!important}
 
-  // Weighted average return
-  const weightedReturn = parts.reduce((acc, p) => {
-    return acc + (p.Alokasi_Persen / 100) * (p.Return_Persen / 100);
-  }, 0);
+/* ══════════════════════════════════════
+   LANDING — Currency Picker
+══════════════════════════════════════ */
+#landing{animation:emerge .9s cubic-bezier(.16,1,.3,1)}
+.hero-anchor{font-size:80px;display:block;margin:0 auto 20px;filter:drop-shadow(0 0 36px rgba(255,215,0,.65));animation:anchorFloat 6s ease-in-out infinite}
+@keyframes anchorFloat{0%,100%{transform:translateY(0) rotate(-4deg)}50%{transform:translateY(-18px) rotate(4deg)}}
+.wordmark{font-family:'Cinzel',serif;font-size:clamp(28px,5.5vw,56px);font-weight:900;color:var(--gold);letter-spacing:.08em;text-shadow:0 0 60px rgba(255,215,0,.35),0 4px 30px rgba(0,0,120,.8);line-height:1;margin-bottom:6px}
+.wordmark-ver{font-family:'Cinzel',serif;font-size:clamp(10px,1.6vw,14px);font-weight:400;color:var(--muted);letter-spacing:.3em;text-transform:uppercase;margin-bottom:52px}
 
-  // FIRE target: Target * 25 (4% rule)
-  const fireCapital = targetPI * 12 * 25;
+/* Currency grid */
+.cc-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;width:100%;max-width:580px;margin-bottom:40px}
+.cc-card{background:rgba(0,0,90,.5);border:1px solid var(--border);border-radius:var(--r);padding:28px 16px 24px;cursor:pointer;transition:all .3s cubic-bezier(.16,1,.3,1);position:relative;overflow:hidden;backdrop-filter:blur(12px)}
+.cc-card::after{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 50% 0%,rgba(255,215,0,.12),transparent 65%);opacity:0;transition:opacity .3s}
+.cc-card:hover{border-color:var(--gold-mid);transform:translateY(-5px);box-shadow:0 20px 50px rgba(0,0,0,.5),0 0 40px rgba(255,215,0,.12)}
+.cc-card:hover::after,.cc-card.sel::after{opacity:1}
+.cc-card.sel{border-color:var(--gold);background:rgba(255,215,0,.07);box-shadow:0 0 40px rgba(255,215,0,.2),inset 0 0 30px rgba(255,215,0,.04)}
+.cc-flag{font-size:32px;display:block;margin-bottom:10px}
+.cc-sym{font-family:'Cinzel',serif;font-size:26px;font-weight:700;color:var(--gold);display:block;margin-bottom:4px;text-shadow:0 0 20px rgba(255,215,0,.4)}
+.cc-name{font-size:14px;color:var(--parchment);font-weight:600;display:block;margin-bottom:3px}
+.cc-lang{font-size:10px;color:var(--muted);letter-spacing:.12em;font-family:'JetBrains Mono',monospace}
 
-  // Projection: compound growth on accumulated portfolio
-  const projectionData = [];
-  let portfolio = 0;
-  let salaryAccum = 0;
-  const years = 30;
+/* Rate panel */
+.rate-panel{width:100%;max-width:460px;background:rgba(0,0,90,.4);border:1px solid var(--border);border-radius:var(--r);padding:20px 24px;margin-bottom:32px;backdrop-filter:blur(8px)}
+.rate-panel-lbl{font-family:'Cinzel',serif;font-size:10px;color:var(--gold-mid);letter-spacing:.2em;text-transform:uppercase;margin-bottom:12px;display:block}
+.rate-row{display:flex;gap:12px;align-items:center}
+.rate-desc-txt{font-size:13px;color:var(--muted);font-style:italic;flex:1;text-align:left}
+.rate-inp{background:var(--input-bg);border:2px solid var(--input-bdr);border-radius:var(--r-sm);padding:10px 16px;font-family:'JetBrains Mono',monospace;font-size:16px;font-weight:700;color:var(--navy-ink);width:160px;text-align:center;outline:none;transition:border-color .2s,box-shadow .2s}
+.rate-inp:focus{border-color:var(--gold);box-shadow:0 0 20px rgba(255,215,0,.25)}
+.rate-note-txt{font-size:11px;color:var(--muted);margin-top:8px;font-style:italic}
 
-  for (let y = 1; y <= years; y++) {
-    portfolio = (portfolio + annualSaving) * (1 + weightedReturn);
-    salaryAccum += annualSaving;
-    projectionData.push({
-      year: `Thn ${y}`,
-      Investasi: Math.round(portfolio),
-      GajiSaja: Math.round(salaryAccum),
-      FIRE: Math.round(fireCapital)
+/* Buttons */
+.btn-gold{display:inline-flex;align-items:center;gap:10px;background:linear-gradient(135deg,var(--gold-dark),var(--gold),var(--gold-dark));color:var(--navy-ink);font-family:'Cinzel',serif;font-size:14px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;padding:14px 36px;border-radius:var(--r-sm);border:none;cursor:pointer;box-shadow:0 4px 30px rgba(255,215,0,.35),0 2px 0 rgba(0,0,0,.3);transition:all .2s}
+.btn-gold:hover{transform:translateY(-2px);box-shadow:0 8px 40px rgba(255,215,0,.45)}
+.btn-ghost{display:inline-flex;align-items:center;gap:8px;background:transparent;border:1px solid rgba(255,215,0,.35);color:var(--gold-mid);font-family:'Cinzel',serif;font-size:12px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;padding:11px 24px;border-radius:var(--r-sm);cursor:pointer;transition:all .2s}
+.btn-ghost:hover{border-color:var(--gold);color:var(--gold);background:rgba(255,215,0,.06)}
+.btn-row{display:flex;gap:12px;flex-wrap:wrap;justify-content:center;margin-top:20px}
+.btn-sm{background:transparent;border:1px solid var(--border);color:var(--muted);padding:8px 16px;border-radius:var(--r-sm);cursor:pointer;font-size:12px;font-family:'Cinzel',serif;letter-spacing:.07em;transition:all .2s}
+.btn-sm:hover{border-color:var(--gold-mid);color:var(--gold-mid)}
+
+/* ══════════════════════════════════════
+   UPLOAD PAGE
+══════════════════════════════════════ */
+#upload-page{animation:emerge .6s cubic-bezier(.16,1,.3,1)}
+.upload-badge{display:inline-flex;align-items:center;gap:8px;background:rgba(255,215,0,.1);border:1px solid rgba(255,215,0,.3);border-radius:20px;padding:6px 18px;font-family:'Cinzel',serif;font-size:11px;color:var(--gold-mid);letter-spacing:.15em;text-transform:uppercase;margin-bottom:28px}
+.upload-ttl{font-family:'Cinzel',serif;font-size:clamp(22px,4vw,38px);font-weight:700;color:var(--gold-pale);text-shadow:0 0 40px rgba(255,215,0,.25);margin-bottom:8px;line-height:1.2}
+.upload-sub{color:var(--muted);font-size:15px;margin-bottom:40px;font-style:italic}
+#drop-zone{width:100%;max-width:480px;border:2px dashed rgba(255,215,0,.25);border-radius:var(--r);padding:56px 32px;cursor:pointer;background:rgba(0,0,90,.3);backdrop-filter:blur(12px);transition:all .3s;position:relative;overflow:hidden}
+#drop-zone.drag{border-color:var(--gold);background:rgba(255,215,0,.05);box-shadow:0 0 60px rgba(255,215,0,.18)}
+.dz-icon{font-size:52px;display:block;margin:0 auto 18px;filter:drop-shadow(0 0 16px rgba(0,200,180,.4))}
+.dz-main{font-size:15px;color:var(--parchment);margin-bottom:6px}
+.dz-sub{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted)}
+.dz-scan{position:absolute;bottom:0;left:-100%;right:-100%;height:2px;background:linear-gradient(90deg,transparent,var(--teal),transparent);animation:scan 3.5s ease-in-out infinite;opacity:.6}
+@keyframes scan{0%{transform:translateX(-30%)}100%{transform:translateX(30%)}}
+.err-box{width:100%;max-width:480px;margin-top:16px;padding:14px 18px;border-radius:var(--r-sm);background:rgba(255,23,68,.1);border:1px solid rgba(255,23,68,.4);display:none;align-items:flex-start;gap:10px;text-align:left}
+.err-box.on{display:flex}
+.err-box p{font-size:13px;color:#FF8A9A;line-height:1.6}
+
+/* ══════════════════════════════════════
+   CINEMATIC LOADER
+══════════════════════════════════════ */
+#loader{position:fixed;inset:0;z-index:9999;background:radial-gradient(ellipse at 30% 40%,#00005A,#00003A 50%,#000020 100%);flex-direction:column;align-items:center;justify-content:center;text-align:center;display:none}
+#loader.on{display:flex}
+.ld-ship{font-size:72px;animation:shipRock 2.2s ease-in-out infinite;filter:drop-shadow(0 0 40px rgba(255,215,0,.55));margin-bottom:36px}
+@keyframes shipRock{0%,100%{transform:rotate(-5deg) translateY(0)}50%{transform:rotate(5deg) translateY(-18px)}}
+.ld-title{font-family:'Cinzel',serif;font-size:clamp(20px,3.5vw,32px);color:var(--gold-pale);margin-bottom:10px;text-shadow:0 0 30px rgba(255,215,0,.4)}
+.ld-step{font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--teal);min-height:20px;letter-spacing:.06em;transition:opacity .3s}
+.ld-track{width:300px;height:3px;background:rgba(255,255,255,.1);border-radius:2px;margin:24px auto 0;overflow:hidden}
+.ld-bar{height:100%;width:0%;background:linear-gradient(90deg,var(--gold-dark),var(--gold),var(--teal));border-radius:2px;transition:width .45s ease;box-shadow:0 0 16px rgba(255,215,0,.5)}
+.ld-dots{display:flex;gap:8px;justify-content:center;margin-top:24px}
+.ld-dot{width:6px;height:6px;border-radius:50%;background:var(--gold);animation:dotPop 1.4s ease-in-out infinite}
+.ld-dot:nth-child(2){animation-delay:.2s}.ld-dot:nth-child(3){animation-delay:.4s}
+@keyframes dotPop{0%,100%{opacity:.2;transform:scale(.7)}50%{opacity:1;transform:scale(1.3)}}
+
+/* ══════════════════════════════════════
+   DASHBOARD
+══════════════════════════════════════ */
+#dashboard{max-width:1140px;margin:0 auto;padding:28px 20px 100px;display:none;animation:emerge .7s cubic-bezier(.16,1,.3,1)}
+#dashboard.on{display:block}
+@keyframes emerge{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:none}}
+
+/* Topbar */
+.topbar{display:flex;align-items:center;justify-content:space-between;margin-bottom:32px;flex-wrap:wrap;gap:12px}
+.tb-brand{font-family:'Cinzel',serif;font-size:clamp(18px,3vw,30px);font-weight:700;color:var(--gold);text-shadow:0 0 30px rgba(255,215,0,.3)}
+.tb-meta{font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--muted);letter-spacing:.12em;margin-top:3px}
+.tb-right{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+.chip{display:inline-flex;align-items:center;gap:5px;background:rgba(255,215,0,.1);border:1px solid rgba(255,215,0,.25);border-radius:20px;padding:5px 12px;font-family:'JetBrains Mono',monospace;font-size:10px;color:var(--gold-mid);letter-spacing:.08em}
+.chip.red{background:rgba(255,23,68,.1);border-color:rgba(255,23,68,.35);color:#FF8A9A}
+
+/* Allocation warning strip */
+#alloc-warn{background:rgba(255,215,0,.08);border:1px solid rgba(255,215,0,.3);border-radius:var(--r-sm);padding:12px 18px;font-size:13px;color:var(--gold-pale);display:none;align-items:center;gap:10px;margin-bottom:16px}
+#alloc-warn.on{display:flex}
+
+/* Inflation slider */
+.inf-ctrl{display:flex;align-items:center;gap:14px;background:rgba(0,0,90,.5);border:1px solid var(--border);border-radius:var(--r-sm);padding:12px 18px;margin-bottom:16px}
+.inf-ctrl label{font-family:'Cinzel',serif;font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--muted);flex-shrink:0}
+.inf-ctrl input[type=range]{flex:1;accent-color:var(--gold);cursor:pointer}
+.inf-val{font-family:'JetBrains Mono',monospace;font-size:14px;color:#FF8A9A;font-weight:700;min-width:44px;text-align:right;flex-shrink:0}
+
+/* Grids */
+.g2{display:grid;grid-template-columns:1fr 1fr;gap:20px;margin-bottom:20px}
+.g3{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:20px}
+.g4{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px}
+@media(max-width:760px){.g2{grid-template-columns:1fr}.g3{grid-template-columns:1fr 1fr}.g4{grid-template-columns:1fr 1fr}}
+@media(max-width:480px){.g3,.g4{grid-template-columns:1fr}}
+
+/* Cards */
+.card{background:rgba(0,0,80,.55);border:1px solid rgba(255,215,0,.12);border-radius:var(--r);padding:22px;backdrop-filter:blur(8px);transition:border-color .2s}
+.card:hover{border-color:rgba(255,215,0,.25)}
+.card-lbl{font-family:'Cinzel',serif;font-size:9px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);margin-bottom:8px}
+.en-hint{font-family:'JetBrains Mono',monospace;font-size:8px;color:rgba(128,144,176,.5);margin-left:5px;letter-spacing:.06em}
+
+/* FIRE hero */
+.fire-card{background:rgba(0,0,80,.7);border:1px solid rgba(255,215,0,.25);border-radius:var(--r);padding:24px;position:relative;overflow:hidden}
+.fire-card::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 20% 50%,rgba(255,215,0,.07),transparent 65%);pointer-events:none}
+.fire-num{font-family:'Cinzel',serif;font-size:clamp(28px,5vw,44px);font-weight:900;color:var(--gold-pale);line-height:1;margin:10px 0 6px;text-shadow:0 0 30px rgba(255,215,0,.45)}
+.fire-sub{color:var(--muted);font-size:13px;font-style:italic;margin-bottom:8px}
+.fire-badge{display:inline-block;background:rgba(0,200,83,.12);border:1px solid rgba(0,200,83,.35);color:var(--green);font-size:12px;padding:4px 14px;border-radius:20px;margin-top:6px;font-family:'JetBrains Mono',monospace}
+.inf-note{font-size:11px;color:#FF8A9A;margin-top:10px;font-style:italic;line-height:1.5;padding:8px 10px;background:rgba(255,23,68,.07);border-radius:6px;border-left:2px solid rgba(255,23,68,.35);display:none}
+
+/* Metric rows */
+.m-row{background:rgba(0,0,80,.5);border:1px solid rgba(255,255,255,.06);border-radius:var(--r-sm);padding:12px 18px;display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;transition:border-color .2s}
+.m-row:last-child{margin-bottom:0}.m-row:hover{border-color:rgba(255,215,0,.2)}
+.m-lbl{font-size:12px;color:var(--muted)}.m-en{display:block;font-family:'JetBrains Mono',monospace;font-size:9px;color:rgba(128,144,176,.5);margin-top:2px}
+.m-val{font-family:'JetBrains Mono',monospace;font-weight:700;font-size:14px}
+.m-sub{font-size:10px;font-weight:400;color:var(--muted);font-family:'Crimson Text',serif;display:block;margin-top:2px}
+
+/* Stat cards */
+.sc{background:rgba(0,0,80,.55);border:1px solid rgba(255,215,0,.12);border-radius:var(--r);padding:20px;text-align:center;transition:all .25s}
+.sc:hover{border-color:rgba(255,215,0,.3);transform:translateY(-3px)}
+.sc-icon{font-size:26px;margin-bottom:10px;display:block}
+.sc-lbl{font-family:'Cinzel',serif;font-size:9px;text-transform:uppercase;letter-spacing:.15em;color:var(--muted);margin-bottom:2px}
+.sc-en{font-family:'JetBrains Mono',monospace;font-size:8px;color:rgba(128,144,176,.5);display:block;margin-bottom:8px;letter-spacing:.06em}
+.sc-val{font-family:'JetBrains Mono',monospace;font-size:18px;font-weight:700;color:var(--gold-pale)}
+.sc-unit{font-size:10px;color:rgba(128,144,176,.5);margin-top:3px}
+
+/* Chart */
+.chart-card{background:rgba(0,0,80,.55);border:1px solid rgba(255,215,0,.12);border-radius:var(--r);padding:24px;margin-bottom:20px}
+.chart-wrap{position:relative;height:280px}
+.chart-note{text-align:center;font-size:12px;margin-top:12px;color:var(--green);display:none;font-style:italic}
+
+/* Analytics accordion */
+.accord{background:rgba(0,0,80,.55);border:1px solid rgba(255,215,0,.12);border-radius:var(--r);margin-bottom:20px;overflow:hidden}
+.accord-hdr{padding:18px 22px;cursor:pointer;display:flex;justify-content:space-between;align-items:center;transition:background .2s;user-select:none}
+.accord-hdr:hover{background:rgba(255,215,0,.05)}
+.accord-tog{font-size:18px;color:var(--gold);transition:transform .3s}
+.accord-tog.open{transform:rotate(180deg)}
+.accord-body{display:none;padding:0 22px 22px}
+.accord-body.open{display:block}
+.accord-sec{margin-bottom:20px;padding-top:16px;border-top:1px solid var(--border)}
+.accord-sec:first-child{border-top:none;padding-top:0}
+.accord-title{font-family:'Cinzel',serif;font-size:10px;color:var(--gold);letter-spacing:.12em;text-transform:uppercase;margin-bottom:10px}
+.formula-box{background:rgba(0,0,30,.8);border:1px solid var(--border);border-left:3px solid var(--teal);border-radius:var(--r-sm);padding:14px 16px;font-family:'JetBrains Mono',monospace;font-size:12px;color:var(--teal);line-height:1.9;white-space:pre-wrap}
+.f-cmt{color:var(--muted);font-size:11px}.f-res{color:var(--gold);font-weight:700}
+
+/* Year table */
+.yr-table{width:100%;border-collapse:collapse;font-size:12px}
+.yr-table th{text-align:left;color:var(--muted);font-weight:400;font-family:'Cinzel',serif;font-size:9px;text-transform:uppercase;letter-spacing:.12em;padding:8px 10px;border-bottom:1px solid var(--border)}
+.yr-table td{padding:8px 10px;border-bottom:1px solid rgba(255,215,0,.06);font-family:'JetBrains Mono',monospace}
+.yr-table tr:last-child td{border-bottom:none}.yr-table tr:hover td{background:rgba(255,215,0,.04)}
+.yr-fire{color:var(--green);font-weight:700}
+.show-more{background:transparent;border:1px solid var(--border);color:var(--muted);padding:8px 20px;border-radius:6px;cursor:pointer;font-size:12px;font-family:'Cinzel',serif;margin-top:12px;transition:all .2s;display:block;width:100%}
+.show-more:hover{border-color:var(--gold);color:var(--gold)}
+
+/* Asset table */
+.asset-table{width:100%;border-collapse:collapse;font-size:13px}
+.asset-table th{text-align:left;color:var(--muted);font-weight:400;font-family:'Cinzel',serif;font-size:9px;text-transform:uppercase;letter-spacing:.14em;padding-bottom:10px;border-bottom:1px solid rgba(255,215,0,.2)}
+.asset-table td{padding:11px 0;border-bottom:1px solid rgba(255,215,0,.07)}
+.asset-table tr:last-child td{border-bottom:none}
+.a-dot{width:9px;height:9px;border-radius:50%;display:inline-block;margin-right:8px;vertical-align:middle}
+
+/* Vessel */
+.vessel-wrap{display:flex;flex-direction:column;align-items:center}
+.vessel-svg{width:100%;max-width:320px}
+
+/* FAB */
+#fab{position:fixed;bottom:28px;right:28px;z-index:200;width:52px;height:52px;border-radius:50%;background:linear-gradient(135deg,var(--gold-dark),var(--gold));border:none;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:22px;box-shadow:0 4px 24px rgba(255,215,0,.4);transition:all .3s}
+#fab:hover{transform:scale(1.12);box-shadow:0 8px 36px rgba(255,215,0,.55)}
+.fab-tip{position:absolute;right:60px;background:var(--navy-card);border:1px solid var(--border);color:var(--parchment);font-size:11px;padding:5px 10px;border-radius:6px;white-space:nowrap;opacity:0;pointer-events:none;transition:opacity .2s;font-family:'Cinzel',serif;letter-spacing:.06em}
+#fab:hover .fab-tip{opacity:1}
+
+/* Modals */
+.modal{position:fixed;inset:0;z-index:300;display:none;align-items:center;justify-content:center;padding:20px}
+.modal.open{display:flex}
+.modal-bd{position:absolute;inset:0;background:rgba(0,0,30,.88);backdrop-filter:blur(8px)}
+.modal-box{position:relative;z-index:1;background:var(--navy-mid);border:1px solid rgba(255,215,0,.2);border-radius:18px;width:100%;max-width:580px;max-height:84vh;overflow:hidden;display:flex;flex-direction:column;animation:modalPop .3s cubic-bezier(.16,1,.3,1)}
+.modal-box.wide{max-width:680px}
+@keyframes modalPop{from{opacity:0;transform:scale(.93) translateY(12px)}to{opacity:1;transform:none}}
+.modal-hdr{padding:22px 24px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center;flex-shrink:0}
+.modal-hdr h2{font-family:'Cinzel',serif;color:var(--gold-pale);font-size:18px;font-weight:600}
+.modal-x{background:transparent;border:none;color:var(--muted);font-size:26px;cursor:pointer;line-height:1;transition:color .2s}
+.modal-x:hover{color:var(--parchment)}
+.modal-body{overflow-y:auto;padding:20px 24px;flex:1}
+
+/* Changelog entries */
+.cl-entry{margin-bottom:20px;padding-bottom:20px;border-bottom:1px solid var(--border)}
+.cl-entry:last-child{border-bottom:none;margin-bottom:0;padding-bottom:0}
+.cl-ver{font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--gold);letter-spacing:.15em;margin-bottom:3px}
+.cl-date{font-size:10px;color:var(--muted);margin-bottom:8px}
+.cl-ttl{font-family:'Cinzel',serif;font-size:16px;color:var(--parchment);margin-bottom:8px}
+.cl-items{list-style:none;display:flex;flex-direction:column;gap:5px}
+.cl-items li{font-size:12px;color:var(--muted);padding-left:16px;position:relative;line-height:1.5}
+.cl-items li::before{content:'→';position:absolute;left:0;color:var(--teal)}
+
+/* Footer */
+.footer{text-align:center;color:rgba(128,144,176,.28);font-size:10px;margin-top:40px;font-family:'JetBrains Mono',monospace;letter-spacing:.15em}
+
+/* Scrollbar */
+::-webkit-scrollbar{width:5px}::-webkit-scrollbar-track{background:var(--navy-ink)}::-webkit-scrollbar-thumb{background:var(--border);border-radius:3px}
+input[type=file]{display:none}
+</style>
+</head>
+<body>
+
+<canvas id="bg-canvas"></canvas>
+
+<div id="app">
+
+<!-- ══════════════════════════════
+     LANDING
+══════════════════════════════ -->
+<div id="landing" class="page">
+  <span class="hero-anchor">⚓</span>
+  <div class="wordmark-ver">Version 4.0 · Universal Navigator Edition</div>
+  <h1 class="wordmark">The Great Voyage</h1>
+
+  <div class="cc-grid">
+    <div class="cc-card sel" id="cc-IDR" onclick="selectCur('IDR',this)">
+      <span class="cc-flag">🇮🇩</span><span class="cc-sym">Rp</span>
+      <span class="cc-name">Rupiah</span><span class="cc-lang">BAHASA INDONESIA</span>
+    </div>
+    <div class="cc-card" id="cc-PHP" onclick="selectCur('PHP',this)">
+      <span class="cc-flag">🇵🇭</span><span class="cc-sym">₱</span>
+      <span class="cc-name">Peso</span><span class="cc-lang">FILIPINO</span>
+    </div>
+    <div class="cc-card" id="cc-USD" onclick="selectCur('USD',this)">
+      <span class="cc-flag">🇺🇸</span><span class="cc-sym">$</span>
+      <span class="cc-name">Dollar</span><span class="cc-lang">ENGLISH</span>
+    </div>
+  </div>
+
+  <div class="rate-panel" id="rate-panel">
+    <span class="rate-panel-lbl">💱 Exchange Rate Configuration</span>
+    <div class="rate-row">
+      <span class="rate-desc-txt" id="rate-desc">USD → IDR conversion rate</span>
+      <input class="rate-inp" id="rate-inp" type="number" value="16000" min="1" oninput="syncRate()"/>
+    </div>
+    <div class="rate-note-txt" id="rate-note">All USD values × this rate for local display.</div>
+  </div>
+
+  <button class="btn-gold" onclick="goUpload()">Set Sail &nbsp;→</button>
+</div>
+
+<!-- ══════════════════════════════
+     UPLOAD
+══════════════════════════════ -->
+<div id="upload-page" class="page hide">
+  <div class="upload-badge" id="up-badge">🇮🇩 Rp · Bahasa Indonesia</div>
+  <h2 class="upload-ttl" id="up-ttl">Upload Logbook Excel</h2>
+  <p class="upload-sub" id="up-sub">Seret &amp; lepas GreatVoyage_Premium_v1.xlsx</p>
+
+  <div id="drop-zone" onclick="document.getElementById('file-inp').click()">
+    <span class="dz-icon">🗺️</span>
+    <p class="dz-main" id="dz-main">Seret &amp; lepas file Excel di sini</p>
+    <p class="dz-sub">.xlsx · .xls · coordinate-mapped parser v4</p>
+    <div class="dz-scan"></div>
+  </div>
+  <input type="file" id="file-inp" accept=".xlsx,.xls"/>
+
+  <div class="err-box" id="err-box"><span style="font-size:18px;flex-shrink:0">⚠️</span><p id="err-msg"></p></div>
+
+  <div class="btn-row">
+    <button class="btn-gold" onclick="document.getElementById('file-inp').click()">📂 Choose File</button>
+    <button class="btn-ghost" onclick="dlTemplate()">⬇ Download Template</button>
+    <button class="btn-ghost" onclick="showLanding()">← Back</button>
+  </div>
+</div>
+
+<!-- ══════════════════════════════
+     LOADER
+══════════════════════════════ -->
+<div id="loader">
+  <div class="ld-ship">🚢</div>
+  <h2 class="ld-title" id="ld-title">Plotting Course...</h2>
+  <div class="ld-step" id="ld-step"></div>
+  <div class="ld-track"><div class="ld-bar" id="ld-bar"></div></div>
+  <div class="ld-dots"><div class="ld-dot"></div><div class="ld-dot"></div><div class="ld-dot"></div></div>
+</div>
+
+<!-- ══════════════════════════════
+     DASHBOARD
+══════════════════════════════ -->
+<div id="dashboard">
+
+  <!-- Topbar -->
+  <div class="topbar">
+    <div>
+      <div class="tb-meta" id="db-file"></div>
+      <div class="tb-brand">⚓ The Great Voyage</div>
+    </div>
+    <div class="tb-right">
+      <div class="chip" id="db-cur-chip"></div>
+      <div class="chip" id="db-inf-chip">Inflation 4.0%</div>
+      <div class="chip red hide" id="db-alloc-chip">⚠ Alloc ≠ 100%</div>
+      <button class="btn-sm" onclick="openModal('detail-modal')">🔍 Details</button>
+      <button class="btn-sm" onclick="resetUpload()">↩ Change File</button>
+      <button class="btn-sm" onclick="showLanding()">⚑ Currency</button>
+    </div>
+  </div>
+
+  <!-- Allocation warning -->
+  <div id="alloc-warn">
+    ⚠️ <strong style="margin-right:6px">Allocation Warning:</strong>
+    <span id="alloc-warn-msg"></span>
+  </div>
+
+  <!-- Inflation slider -->
+  <div class="inf-ctrl">
+    <label>🌊 Annual Inflation <span class="en-hint">(Inflasi Tahunan)</span></label>
+    <input type="range" min="1" max="12" value="4" step="0.5" id="inf-slider" oninput="onInflation(this.value)"/>
+    <span class="inf-val" id="inf-display">4.0%</span>
+  </div>
+
+  <!-- Row 1: Vessel + FIRE -->
+  <div class="g2">
+    <!-- Vessel -->
+    <div class="card vessel-wrap">
+      <div class="card-lbl" style="text-align:center;margin-bottom:14px">Investment Fleet <span class="en-hint">(Armada Investasi)</span></div>
+      <svg id="vessel-svg" class="vessel-svg" viewBox="0 0 280 180" xmlns="http://www.w3.org/2000/svg">
+        <defs><filter id="glow"><feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+        <ellipse cx="140" cy="160" rx="118" ry="11" fill="#00002A" opacity=".9"/>
+        <path d="M22 155 Q60 148 100 155 Q140 163 180 155 Q220 148 258 155" stroke="#00C8B4" stroke-width="1.5" fill="none" opacity=".3"/>
+        <path id="v-hull" d="M52 120 L63 147 L217 147 L228 120 Z" fill="#00C8B4" opacity=".85" filter="url(#glow)"/>
+        <rect id="v-hull2" x="52" y="113" width="176" height="9" rx="2" fill="#00C8B4" opacity=".5"/>
+        <rect x="90" y="85" width="100" height="35" rx="4" fill="#000060" stroke="#FFD700" stroke-width="1.2"/>
+        <rect x="100" y="93" width="18" height="13" rx="2" fill="#00003A" stroke="#00C8B4" stroke-width=".8" opacity=".9"/>
+        <rect x="126" y="93" width="18" height="13" rx="2" fill="#00003A" stroke="#00C8B4" stroke-width=".8" opacity=".9"/>
+        <rect x="152" y="93" width="18" height="13" rx="2" fill="#00003A" stroke="#00C8B4" stroke-width=".8" opacity=".9"/>
+        <rect id="v-engine" x="154" y="60" width="22" height="32" rx="3" fill="#FFD700" opacity=".9" filter="url(#glow)"/>
+        <rect id="v-engine2" x="159" y="52" width="12" height="13" rx="2" fill="#FFD700" opacity=".8"/>
+        <circle id="v-s1" cx="165" cy="46" r="5" fill="#FFD700" opacity=".5"/>
+        <circle id="v-s2" cx="161" cy="38" r="4" fill="#FFD700" opacity=".3"/>
+        <circle id="v-s3" cx="168" cy="31" r="3" fill="#FFD700" opacity=".18"/>
+        <line x1="130" y1="30" x2="130" y2="90" stroke="#FFD700" stroke-width="2"/>
+        <line x1="100" y1="50" x2="160" y2="50" stroke="#FFD700" stroke-width="1.2"/>
+        <polygon points="130,30 155,40 130,50" fill="#FFF5A0" opacity=".9"/>
+        <circle id="v-life" cx="65" cy="115" r="12" fill="none" stroke="#A78BFA" stroke-width="3.5" filter="url(#glow)"/>
+        <circle cx="65" cy="115" r="5" fill="#A78BFA" opacity=".2"/>
+        <line x1="65" y1="103" x2="65" y2="109" stroke="#A78BFA" stroke-width="2"/>
+        <line x1="65" y1="121" x2="65" y2="127" stroke="#A78BFA" stroke-width="2"/>
+        <line x1="53" y1="115" x2="59" y2="115" stroke="#A78BFA" stroke-width="2"/>
+        <line x1="71" y1="115" x2="77" y2="115" stroke="#A78BFA" stroke-width="2"/>
+        <text x="208" y="140" font-size="14" fill="#FFD700" opacity=".6">⚓</text>
+      </svg>
+      <div id="asset-legend" style="width:100%;margin-top:16px"></div>
+    </div>
+
+    <!-- FIRE column -->
+    <div style="display:flex;flex-direction:column;gap:12px">
+      <div class="fire-card">
+        <div class="card-lbl">Journey Remaining <span class="en-hint">(Sisa Perjalanan)</span></div>
+        <div class="fire-num" id="db-contracts">—</div>
+        <div class="fire-sub" id="db-years">—</div>
+        <div id="db-fire-badge"></div>
+        <div class="inf-note" id="db-inf-note"></div>
+      </div>
+      <div class="m-row"><span class="m-lbl">Annual Fuel<span class="m-en">Net Annual Savings</span></span><span class="m-val" style="color:var(--gold)" id="db-fuel">—</span></div>
+      <div class="m-row"><span class="m-lbl">FIRE Capital<span class="m-en">Freedom Number (4% Rule · adj)</span></span><span class="m-val" style="color:var(--teal)" id="db-fire">—</span></div>
+      <div class="m-row"><span class="m-lbl">Weighted Return<span class="m-en">Blended Portfolio Return</span></span><span class="m-val" style="color:#A78BFA" id="db-wr">—</span></div>
+      <div class="m-row"><span class="m-lbl">Target Income<span class="m-en">Monthly Passive Income</span></span><span class="m-val" style="color:var(--green)" id="db-target">—</span></div>
+    </div>
+  </div>
+
+  <!-- Row 2: stat cards -->
+  <div class="g3">
+    <div class="sc"><span class="sc-icon">⚡</span><div class="sc-lbl">On-Board</div><div class="sc-en">Months at Sea</div><div class="sc-val" id="db-on">—</div><div class="sc-unit">per contract</div></div>
+    <div class="sc"><span class="sc-icon">🏠</span><div class="sc-lbl">Off-Board</div><div class="sc-en">Shore Leave</div><div class="sc-val" id="db-off">—</div><div class="sc-unit">per contract</div></div>
+    <div class="sc"><span class="sc-icon">💰</span><div class="sc-lbl">Sea Wages</div><div class="sc-en">Gaji Laut / Month</div><div class="sc-val" id="db-gaji">—</div><div class="sc-unit">gross USD</div></div>
+  </div>
+
+  <!-- Chart -->
+  <div class="chart-card">
+    <div class="card-lbl" style="margin-bottom:18px">📈 Wealth Projection — 30 Years <span class="en-hint">(Investment Path vs Salary Only)</span></div>
+    <div class="chart-wrap"><canvas id="voyage-chart"></canvas></div>
+    <div class="chart-note" id="chart-note"></div>
+  </div>
+
+  <!-- Navigation Transparency Accordion -->
+  <div class="accord">
+    <div class="accord-hdr" onclick="toggleAccord()">
+      <div>
+        <div class="card-lbl" style="margin-bottom:2px">🔭 Navigation Transparency</div>
+        <div style="font-size:12px;color:var(--muted);font-style:italic">Lihat detail kalkulasi — How your numbers are calculated</div>
+      </div>
+      <div class="accord-tog" id="accord-tog">▾</div>
+    </div>
+    <div class="accord-body" id="accord-body">
+      <!-- Fuel -->
+      <div class="accord-sec">
+        <div class="accord-title">⛽ Annual Fuel — Cell Coordinate Map</div>
+        <div class="formula-box" id="formula-fuel">—</div>
+      </div>
+      <!-- WR -->
+      <div class="accord-sec">
+        <div class="accord-title">⚖️ Weighted Return — Asset Contributions</div>
+        <div class="formula-box" id="formula-wr">—</div>
+        <table class="yr-table" style="margin-top:12px" id="wr-tbl">
+          <thead><tr><th>Asset</th><th>Alloc</th><th>Return</th><th>Contribution</th></tr></thead>
+          <tbody id="wr-tbody"></tbody>
+        </table>
+      </div>
+      <!-- Growth table -->
+      <div class="accord-sec">
+        <div class="accord-title">📅 Year-by-Year Growth (Inflation-Adjusted)</div>
+        <table class="yr-table" id="yr-tbl">
+          <thead><tr><th>Year</th><th>Cumulative Savings</th><th>Portfolio</th><th>Gap to FIRE</th><th>Status</th></tr></thead>
+          <tbody id="yr-tbody"></tbody>
+        </table>
+        <button class="show-more" id="show-more-btn" onclick="toggleYrTable()">▾ Show All 30 Years</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Asset Manifest -->
+  <div class="card" style="margin-bottom:20px">
+    <div class="card-lbl" style="margin-bottom:16px">📋 Asset Manifest — Vessel Parts <span class="en-hint">(VesselParts Sheet)</span></div>
+    <table class="asset-table">
+      <thead><tr><th>Asset Name</th><th>Allocation</th><th>Return/yr</th><th>Annual (USD)</th><th>Local Value</th></tr></thead>
+      <tbody id="asset-tbody"></tbody>
+    </table>
+  </div>
+
+  <div class="footer">THE GREAT VOYAGE v4.0 · COORDINATE-BASED UNIVERSAL PARSER · INFLATION-ADJUSTED FIRE ENGINE</div>
+</div>
+
+</div><!-- #app -->
+
+<!-- FAB -->
+<button id="fab" onclick="openModal('cl-modal')">📜<span class="fab-tip">Voyage Log</span></button>
+
+<!-- Changelog Modal -->
+<div class="modal" id="cl-modal">
+  <div class="modal-bd" onclick="closeModal('cl-modal')"></div>
+  <div class="modal-box">
+    <div class="modal-hdr"><h2>📜 Voyage Log — Changelog</h2><button class="modal-x" onclick="closeModal('cl-modal')">×</button></div>
+    <div class="modal-body">
+      <div class="cl-entry">
+        <div class="cl-ver">v4.0.0</div><div class="cl-date">2025 · Universal Parser Edition</div>
+        <div class="cl-ttl">Coordinate-Based Universal Parser</div>
+        <ul class="cl-items">
+          <li>Cell-coordinate parser — reads Fueling!C7:G7, Target!C6+C12, VesselParts rows 7–20</li>
+          <li>Language-agnostic: labels in Excel don't matter, only cell positions</li>
+          <li>Configurable exchange rate on landing screen</li>
+          <li>VesselParts allocation sum validation with dashboard warning chip</li>
+          <li>Full GreatVoyage_Premium_v1.xlsx compatibility</li>
+          <li>Navigation Transparency accordion with year-by-year growth table</li>
+        </ul>
+      </div>
+      <div class="cl-entry">
+        <div class="cl-ver">v3.0.0</div><div class="cl-date">2025 · Navigator Edition</div>
+        <div class="cl-ttl">Inflation Engine + Multi-Language</div>
+        <ul class="cl-items">
+          <li>IDR / PHP / USD smart localization</li>
+          <li>Inflation-adjusted FIRE logic (1–12% slider)</li>
+          <li>Cinematic loading screen + PWA offline support</li>
+          <li>Dynamic Excel template per language</li>
+        </ul>
+      </div>
+      <div class="cl-entry">
+        <div class="cl-ver">v2.0.0</div><div class="cl-date">2025 · Dual Currency Edition</div>
+        <div class="cl-ttl">IDR/USD Toggle + Simplified Excel</div>
+        <ul class="cl-items">
+          <li>Single-sheet Logbook with IDR auto-formula</li>
+          <li>Annual savings summary box</li>
+        </ul>
+      </div>
+      <div class="cl-entry">
+        <div class="cl-ver">v1.0.0</div><div class="cl-date">2025 · Initial Release</div>
+        <div class="cl-ttl">The Great Voyage Launches</div>
+        <ul class="cl-items">
+          <li>Excel-to-Dashboard pipeline, FIRE logic, 30yr projection, Vessel SVG</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Detail Modal -->
+<div class="modal" id="detail-modal">
+  <div class="modal-bd" onclick="closeModal('detail-modal')"></div>
+  <div class="modal-box wide">
+    <div class="modal-hdr"><h2>📊 Calculation Details</h2><button class="modal-x" onclick="closeModal('detail-modal')">×</button></div>
+    <div class="modal-body" id="detail-body"></div>
+  </div>
+</div>
+
+<!-- ════════════════════════════════════════════════
+     JAVASCRIPT — Full Engine
+════════════════════════════════════════════════ -->
+<script>
+'use strict';
+
+// ── PALETTE ──────────────────────────────────────────────────────
+const COLORS = ['#FFD700','#00C8B4','#A78BFA','#F472B6','#22C55E','#60A5FA'];
+
+// ── LOCALIZATION MAP ─────────────────────────────────────────────
+const LOCALE = {
+  IDR:{
+    flag:'🇮🇩',sym:'Rp',name:'Rupiah',lang:'Bahasa Indonesia',defRate:16000,
+    rateDesc:'USD → IDR conversion rate',rateNote:'Semua nilai USD × kurs = tampilan IDR.',
+    upBadge:'🇮🇩 Rp · Bahasa Indonesia',
+    upTtl:'Upload Logbook Excel',upSub:'Seret & lepas GreatVoyage_Premium_v1.xlsx',
+    dzMain:'Seret & lepas file Excel di sini',
+    ldTitle:'Merencanakan Rute...',
+    ldSteps:['Membaca koordinat sel...','Memvalidasi alokasi aset...','Menyesuaikan arus inflasi...','Menghitung modal FIRE...','Rute siap, Kapten!'],
+    allocWarn:(t)=>`Total Alokasi_Persen = ${t.toFixed(1)}% (harus 100%). Periksa sheet VesselParts.`,
+    infNote:'Target telah disesuaikan dengan estimasi inflasi agar daya beli masa depan tetap sama.',
+    fireBadge:(y)=>`🎯 FIRE di Tahun ${y}`,
+    fireYrs:(y)=>`≈ ${y.toFixed(1)} tahun menuju FIRE`,
+    fireCon:(n)=>`${n} Kontrak`,
+    showMore:'▾ Tampilkan Semua 30 Tahun',showLess:'▴ Sembunyikan',
+  },
+  PHP:{
+    flag:'🇵🇭',sym:'₱',name:'Peso',lang:'Filipino',defRate:56,
+    rateDesc:'USD → PHP conversion rate',rateNote:'Lahat ng USD × exchange rate = PHP display.',
+    upBadge:'🇵🇭 ₱ · Filipino',
+    upTtl:'I-upload ang Logbook Excel',upSub:'I-drag & drop ang GreatVoyage_Premium_v1.xlsx',
+    dzMain:'I-drag & drop ang Excel file dito',
+    ldTitle:'Pinaplano ang Ruta...',
+    ldSteps:['Binabasa ang mga cell coordinates...','Bina-validate ang allocation...','Inaayos para sa implasyon...','Kinakalkula ang FIRE capital...','Handa na, Kapitan!'],
+    allocWarn:(t)=>`Kabuuang Alokasyon = ${t.toFixed(1)}% (kailangan 100%). Tingnan ang VesselParts.`,
+    infNote:'Ang target ay naayos na para sa implasyon upang mapanatili ang kapangyarihan ng pagbili.',
+    fireBadge:(y)=>`🎯 FIRE sa Taon ${y}`,
+    fireYrs:(y)=>`≈ ${y.toFixed(1)} taon para sa FIRE`,
+    fireCon:(n)=>`${n} Kontrata`,
+    showMore:'▾ Ipakita Lahat ng 30 Taon',showLess:'▴ Itago',
+  },
+  USD:{
+    flag:'🇺🇸',sym:'$',name:'Dollar',lang:'English',defRate:1,
+    rateDesc:'Exchange rate (use 1 for pure USD)',rateNote:'Set to 1 to display all values in USD.',
+    upBadge:'🇺🇸 $ · English',
+    upTtl:'Upload Your Logbook',upSub:'Drag & drop GreatVoyage_Premium_v1.xlsx',
+    dzMain:'Drag & drop your Excel file here',
+    ldTitle:'Plotting Course...',
+    ldSteps:['Reading cell coordinates...','Validating asset allocations...','Adjusting for inflation currents...','Computing FIRE capital...','Course plotted, Captain!'],
+    allocWarn:(t)=>`Total Allocation = ${t.toFixed(1)}% (must be 100%). Check VesselParts sheet.`,
+    infNote:'Target adjusted for inflation to preserve future purchasing power.',
+    fireBadge:(y)=>`🎯 FIRE reached at Year ${y}`,
+    fireYrs:(y)=>`≈ ${y.toFixed(1)} years to FIRE`,
+    fireCon:(n)=>`${n} Contracts`,
+    showMore:'▾ Show All 30 Years',showLess:'▴ Collapse',
+  },
+};
+
+// ── STATE ────────────────────────────────────────────────────────
+const S = {
+  currency:    'IDR',
+  rate:        16000,
+  inflation:   0.04,
+  data:        null,
+  computed:    null,
+  chartInst:   null,
+  yrExpanded:  false,
+};
+
+// ── STARFIELD CANVAS ─────────────────────────────────────────────
+(()=>{
+  const cv=document.getElementById('bg-canvas');
+  const ctx=cv.getContext('2d');
+  let stars=[];
+  const resize=()=>{cv.width=innerWidth;cv.height=innerHeight;stars=Array.from({length:150},()=>({x:Math.random()*cv.width,y:Math.random()*cv.height,r:Math.random()*1.5+.3,phase:Math.random()*Math.PI*2,spd:Math.random()*.005+.001}))};
+  const draw=(t)=>{
+    ctx.clearRect(0,0,cv.width,cv.height);
+    const g=ctx.createRadialGradient(cv.width*.3,cv.height*.4,0,cv.width*.5,cv.height*.5,cv.width*.8);
+    g.addColorStop(0,'rgba(0,0,90,.4)');g.addColorStop(.5,'rgba(0,0,50,.25)');g.addColorStop(1,'rgba(0,0,20,.15)');
+    ctx.fillStyle=g;ctx.fillRect(0,0,cv.width,cv.height);
+    stars.forEach(s=>{
+      const op=.08+.7*(.5+.5*Math.sin(t*s.spd+s.phase));
+      ctx.beginPath();ctx.arc(s.x,s.y,s.r,0,Math.PI*2);
+      ctx.fillStyle=`rgba(255,245,180,${op*.85})`;ctx.fill();
     });
-  }
-
-  // Voyage duration: how many contracts to reach FIRE
-  let accum = 0;
-  let contractCount = 0;
-  while (accum < fireCapital && contractCount < 500) {
-    accum = (accum + annualSaving / contractsPerYear) * (1 + weightedReturn / contractsPerYear);
-    contractCount++;
-  }
-
-  const yearsToFIRE = contractCount / contractsPerYear;
-
-  return { annualFuel, annualSaving, weightedReturn, fireCapital, projectionData, contractCount, yearsToFIRE, parts, targetPI, on, off, gaji };
-}
-
-// ─── VESSEL SVG ───────────────────────────────────────────────────────────────
-function VesselSVG({ parts }) {
-  const getColor = (idx) => {
-    const colors = [GOLD, TEAL, "#A78BFA", "#F472B6", GREEN];
-    return colors[idx % colors.length];
+    requestAnimationFrame(draw);
   };
+  window.addEventListener('resize',resize);resize();requestAnimationFrame(draw);
+})();
 
-  const engineAlloc = parts[0]?.Alokasi_Persen || 0;
-  const hullAlloc = parts[1]?.Alokasi_Persen || 0;
-  const lifeAlloc = parts[2]?.Alokasi_Persen || 0;
-  const engineColor = parts[0] ? getColor(0) : "#334155";
-  const hullColor = parts[1] ? getColor(1) : "#334155";
-  const lifeColor = parts[2] ? getColor(2) : "#334155";
-
-  return (
-    <svg viewBox="0 0 280 180" xmlns="http://www.w3.org/2000/svg" style={{ width: "100%", maxWidth: 340, filter: "drop-shadow(0 0 24px rgba(197,160,89,0.18))" }}>
-      <defs>
-        <radialGradient id="engineGlow" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor={engineColor} stopOpacity="0.7" />
-          <stop offset="100%" stopColor={engineColor} stopOpacity="0" />
-        </radialGradient>
-        <radialGradient id="hullGlow" cx="50%" cy="50%" r="50%">
-          <stop offset="0%" stopColor={hullColor} stopOpacity="0.5" />
-          <stop offset="100%" stopColor={hullColor} stopOpacity="0" />
-        </radialGradient>
-        <filter id="glow">
-          <feGaussianBlur stdDeviation="2.5" result="coloredBlur" />
-          <feMerge>
-            <feMergeNode in="coloredBlur" />
-            <feMergeNode in="SourceGraphic" />
-          </feMerge>
-        </filter>
-      </defs>
-
-      {/* Water */}
-      <ellipse cx="140" cy="158" rx="120" ry="14" fill="#0D2137" opacity="0.8" />
-      <path d="M20 155 Q60 148 100 155 Q140 162 180 155 Q220 148 260 155" stroke={TEAL} strokeWidth="1.5" fill="none" opacity="0.4" />
-
-      {/* Hull */}
-      <path d="M50 120 L60 145 L220 145 L230 120 Z" fill={hullColor} opacity="0.85" filter="url(#glow)" />
-      <ellipse cx="140" cy="120" rx="80" ry="6" fill={hullColor} opacity="0.4" />
-      <rect x="50" y="112" width="180" height="10" rx="2" fill={hullColor} opacity="0.6" />
-
-      {/* Hull glow overlay */}
-      <ellipse cx="140" cy="135" rx="90" ry="18" fill="url(#hullGlow)" />
-
-      {/* Cabin / Superstructure */}
-      <rect x="90" y="85" width="100" height="35" rx="4" fill="#0F2744" stroke={GOLD} strokeWidth="1.2" />
-      <rect x="100" y="92" width="20" height="14" rx="2" fill={NAVY} stroke={TEAL} strokeWidth="0.8" opacity="0.9" />
-      <rect x="128" y="92" width="20" height="14" rx="2" fill={NAVY} stroke={TEAL} strokeWidth="0.8" opacity="0.9" />
-      <rect x="156" y="92" width="20" height="14" rx="2" fill={NAVY} stroke={TEAL} strokeWidth="0.8" opacity="0.9" />
-
-      {/* Funnel / Engine stack */}
-      <rect x="155" y="60" width="22" height="32" rx="3" fill={engineColor} opacity="0.9" filter="url(#glow)" />
-      <rect x="160" y="52" width="12" height="14" rx="2" fill={engineColor} opacity="0.8" />
-      {/* Smoke */}
-      <circle cx="166" cy="46" r="5" fill={engineColor} opacity={engineAlloc > 30 ? 0.6 : 0.2} />
-      <circle cx="162" cy="38" r="4" fill={engineColor} opacity={engineAlloc > 30 ? 0.4 : 0.1} />
-      <circle cx="169" cy="31" r="3" fill={engineColor} opacity={engineAlloc > 30 ? 0.25 : 0.05} />
-
-      {/* Mast */}
-      <line x1="130" y1="30" x2="130" y2="90" stroke={GOLD} strokeWidth="2" />
-      <line x1="100" y1="50" x2="160" y2="50" stroke={GOLD} strokeWidth="1.2" />
-
-      {/* Flag */}
-      <polygon points="130,30 155,40 130,50" fill={GOLD_LIGHT} opacity="0.9" />
-
-      {/* Lifebuoy */}
-      <circle cx="65" cy="115" r="12" fill="none" stroke={lifeColor} strokeWidth="3.5" filter="url(#glow)" />
-      <circle cx="65" cy="115" r="6" fill={lifeColor} opacity="0.3" />
-      <line x1="65" y1="103" x2="65" y2="108" stroke={lifeColor} strokeWidth="2" />
-      <line x1="65" y1="122" x2="65" y2="127" stroke={lifeColor} strokeWidth="2" />
-      <line x1="53" y1="115" x2="58" y2="115" stroke={lifeColor} strokeWidth="2" />
-      <line x1="72" y1="115" x2="77" y2="115" stroke={lifeColor} strokeWidth="2" />
-
-      {/* Engine glow */}
-      <ellipse cx="166" cy="76" rx="16" ry="24" fill="url(#engineGlow)" />
-
-      {/* Anchor */}
-      <text x="210" y="138" fontSize="14" fill={GOLD} opacity="0.7">⚓</text>
-    </svg>
-  );
+// ── PAGE NAV ─────────────────────────────────────────────────────
+function showLanding(){
+  document.getElementById('landing').classList.remove('hide');
+  document.getElementById('upload-page').classList.add('hide');
+  document.getElementById('dashboard').classList.remove('on');
+  document.getElementById('dashboard').style.display='none';
+}
+function goUpload(){
+  syncRate();
+  const L=LOCALE[S.currency];
+  set('up-badge',L.upBadge);set('up-ttl',L.upTtl);set('up-sub',L.upSub);set('dz-main',L.dzMain);
+  clearErr();
+  document.getElementById('landing').classList.add('hide');
+  document.getElementById('upload-page').classList.remove('hide');
+}
+function resetUpload(){
+  document.getElementById('dashboard').classList.remove('on');
+  document.getElementById('dashboard').style.display='none';
+  document.getElementById('file-inp').value='';
+  clearErr();
+  if(S.chartInst){S.chartInst.destroy();S.chartInst=null;}
+  document.getElementById('upload-page').classList.remove('hide');
 }
 
-// ─── CUSTOM TOOLTIP ──────────────────────────────────────────────────────────
-function CustomTooltip({ active, payload, label }) {
-  if (!active || !payload?.length) return null;
-  return (
-    <div style={{ background: "#0D2137", border: `1px solid ${GOLD}40`, borderRadius: 10, padding: "10px 16px" }}>
-      <p style={{ color: GOLD, fontFamily: "'Playfair Display', serif", marginBottom: 6, fontSize: 13 }}>{label}</p>
-      {payload.map((p) => (
-        <p key={p.name} style={{ color: p.color, fontSize: 12, margin: "2px 0", fontFamily: "monospace" }}>
-          {p.name}: <b>${p.value?.toLocaleString()}</b>
-        </p>
-      ))}
-    </div>
-  );
+// ── CURRENCY SELECT ──────────────────────────────────────────────
+function selectCur(cur,el){
+  S.currency=cur;
+  document.querySelectorAll('.cc-card').forEach(c=>c.classList.remove('sel'));
+  el.classList.add('sel');
+  const L=LOCALE[cur];
+  document.getElementById('rate-inp').value=L.defRate;
+  set('rate-desc',L.rateDesc);set('rate-note',L.rateNote);
+  document.getElementById('rate-panel').style.display=cur==='USD'?'none':'';
+  syncRate();
+}
+function syncRate(){S.rate=parseFloat(document.getElementById('rate-inp').value)||1;}
+
+// ── FILE EVENTS ──────────────────────────────────────────────────
+const dz=document.getElementById('drop-zone');
+dz.addEventListener('dragover',e=>{e.preventDefault();dz.classList.add('drag');});
+dz.addEventListener('dragleave',()=>dz.classList.remove('drag'));
+dz.addEventListener('drop',e=>{e.preventDefault();dz.classList.remove('drag');const f=e.dataTransfer.files[0];if(f)processFile(f);});
+document.getElementById('file-inp').addEventListener('change',e=>{if(e.target.files[0])processFile(e.target.files[0]);});
+
+function showErr(msg){const b=document.getElementById('err-box');document.getElementById('err-msg').textContent=msg;b.classList.add('on');}
+function clearErr(){document.getElementById('err-box').classList.remove('on');}
+
+// ╔═══════════════════════════════════════════════════════════════╗
+// ║  COORDINATE-BASED PARSER v4                                   ║
+// ║                                                               ║
+// ║  Reads cell values by ADDRESS, never by column header name.  ║
+// ║  100% language-agnostic — works regardless of label text.    ║
+// ║                                                               ║
+// ║  COORDINATE MAP (GreatVoyage_Premium_v1.xlsx):               ║
+// ║  ┌─ Sheet "Fueling" ──────────────────────────────────────┐  ║
+// ║  │  C7 = Bulan_On    (months onboard per contract)        │  ║
+// ║  │  D7 = Bulan_Off   (months shore leave per contract)    │  ║
+// ║  │  E7 = Gaji_Laut   (monthly wage at sea, USD)           │  ║
+// ║  │  F7 = Biaya_Laut  (monthly expenses at sea, USD)       │  ║
+// ║  │  G7 = Biaya_Darat (monthly expenses ashore, USD)       │  ║
+// ║  └────────────────────────────────────────────────────────┘  ║
+// ║  ┌─ Sheet "VesselParts" ──────────────────────────────────┐  ║
+// ║  │  Rows 7–20, Col C = Asset Name                         │  ║
+// ║  │  Rows 7–20, Col D = Alokasi_Persen (allocation %)      │  ║
+// ║  │  Rows 7–20, Col E = Return_Persen  (annual return %)   │  ║
+// ║  │  Auto-skips blank rows and non-numeric allocation rows  │  ║
+// ║  └────────────────────────────────────────────────────────┘  ║
+// ║  ┌─ Sheet "Target" ────────────────────────────────────────┐  ║
+// ║  │  C6  = Target_Passive_Income (monthly goal, USD)        │  ║
+// ║  │  C12 = Modal FIRE (formula result: C6×12×25)           │  ║
+// ║  └────────────────────────────────────────────────────────┘  ║
+// ╚═══════════════════════════════════════════════════════════════╝
+
+/**
+ * cellVal(ws, addr)
+ * Read a cell's computed value from xlsx worksheet.
+ * xlsx stores formula results in cell.v, raw formula in cell.f.
+ * Returns null if cell missing or truly empty.
+ */
+function cellVal(ws, addr){
+  const cell = ws[addr];
+  if(!cell) return null;
+  if(cell.v !== undefined && cell.v !== null && cell.v !== '') return cell.v;
+  return null;
 }
 
-// ─── MAIN COMPONENT ──────────────────────────────────────────────────────────
-export default function TheGreatVoyage() {
-  const [data, setData] = useState(null);
-  const [error, setError] = useState(null);
-  const [dragging, setDragging] = useState(false);
-  const [fileName, setFileName] = useState(null);
-  const fileRef = useRef();
+/** Safe number coercion — strips non-numeric chars, returns 0 on fail */
+function toN(v){ const n=parseFloat(String(v??'').replace(/[^0-9.\-]/g,'')); return isNaN(n)?0:n; }
 
-  const parseFile = useCallback((file) => {
-    setError(null);
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      try {
-        const wb = XLSX.read(e.target.result, { type: "array" });
+/**
+ * parseExcel(wb)
+ * Main coordinate-based parser entry point.
+ * Returns { fuel, parts, targetPI, fireUSD, allocTotal, warnings[] }
+ */
+function parseExcel(wb){
+  const warnings=[];
 
-        // Validate sheets
-        const missingSheets = [];
-        if (!wb.SheetNames.includes("Fueling")) missingSheets.push("Fueling");
-        if (!wb.SheetNames.includes("VesselParts")) missingSheets.push("VesselParts");
-        if (!wb.SheetNames.includes("Target")) missingSheets.push("Target");
-        if (missingSheets.length) {
-          setError(`Sheet tidak ditemukan: ${missingSheets.join(", ")}. Gunakan template yang disediakan.`);
-          return;
-        }
+  // ── Fueling sheet ─────────────────────────────────────────────
+  const wsF=wb.Sheets['Fueling'];
+  if(!wsF) throw new Error('Sheet "Fueling" tidak ditemukan. Gunakan template GreatVoyage_Premium_v1.xlsx.');
 
-        const fuelSheet = XLSX.utils.sheet_to_json(wb.Sheets["Fueling"]);
-        const partsSheet = XLSX.utils.sheet_to_json(wb.Sheets["VesselParts"]);
-        const targetSheet = XLSX.utils.sheet_to_json(wb.Sheets["Target"]);
+  // Coordinate map — reads row 7 (premium template data row)
+  const FUEL_MAP={bulan_on:'C7',bulan_off:'D7',gaji:'E7',biaya_laut:'F7',biaya_darat:'G7'};
+  const fuel={};
+  for(const[key,addr] of Object.entries(FUEL_MAP)){
+    const raw=cellVal(wsF,addr);
+    fuel[key]=toN(raw);
+    if(raw===null) warnings.push(`Fueling!${addr} kosong — menggunakan 0.`);
+  }
 
-        // Validate columns
-        const fuelRow = fuelSheet[0] || {};
-        const missingFuel = REQUIRED_FUEL_COLS.filter(c => !(c in fuelRow));
-        if (missingFuel.length) { setError(`Kolom hilang di sheet Fueling: ${missingFuel.join(", ")}`); return; }
+  // ── VesselParts sheet ─────────────────────────────────────────
+  const wsP=wb.Sheets['VesselParts'];
+  if(!wsP) throw new Error('Sheet "VesselParts" tidak ditemukan.');
 
-        const partRow = partsSheet[0] || {};
-        const missingParts = REQUIRED_PARTS_COLS.filter(c => !(c in partRow));
-        if (missingParts.length) { setError(`Kolom hilang di sheet VesselParts: ${missingParts.join(", ")}`); return; }
+  const parts=[];
+  // Scan rows 7–20: ColC=Name, ColD=Alloc%, ColE=Return%
+  for(let r=7;r<=20;r++){
+    const nameRaw  = cellVal(wsP,`C${r}`);
+    const allocRaw = cellVal(wsP,`D${r}`);
+    const retRaw   = cellVal(wsP,`E${r}`);
+    // Skip if no allocation, or if it's clearly a text/header cell
+    if(allocRaw===null||allocRaw==='') continue;
+    const alloc=toN(allocRaw);
+    if(alloc===0||isNaN(alloc)) continue;
+    // Skip suspiciously large values (e.g. total row = 100 in wrong position)
+    const ret=toN(retRaw);
+    const name=nameRaw?String(nameRaw).trim():`Asset ${parts.length+1}`;
+    // Guard: skip rows where name looks like a label/total row
+    if(name.toUpperCase().includes('TOTAL')||name.toUpperCase().includes('ALOKASI')) continue;
+    parts.push({name,alloc,ret});
+  }
+  if(parts.length===0) throw new Error('Tidak ada data aset di VesselParts (baris 7–20, kolom C/D/E).');
 
-        const targetRow = targetSheet[0] || {};
-        if (!("Target_Passive_Income" in targetRow)) { setError("Kolom Target_Passive_Income tidak ditemukan di sheet Target."); return; }
+  // Validation: allocation sum
+  const allocTotal=parts.reduce((s,p)=>s+p.alloc,0);
+  if(Math.abs(allocTotal-100)>0.01){
+    warnings.push(LOCALE[S.currency].allocWarn(allocTotal));
+  }
 
-        const parts = partsSheet.map(r => ({
-          Nama_Aset: r.Nama_Aset,
-          Alokasi_Persen: Number(r.Alokasi_Persen),
-          Return_Persen: Number(r.Return_Persen)
-        }));
+  // ── Target sheet ──────────────────────────────────────────────
+  const wsT=wb.Sheets['Target'];
+  if(!wsT) throw new Error('Sheet "Target" tidak ditemukan.');
 
-        const result = calculate(fuelRow, parts, targetRow);
-        setData(result);
-        setFileName(file.name);
-      } catch (err) {
-        setError("Gagal membaca file. Pastikan format Excel valid.");
+  const targetPI=toN(cellVal(wsT,'C6'));   // C6 = monthly target income
+  const fireRaw =cellVal(wsT,'C12');        // C12 = FIRE formula result
+  // Prefer reading the Excel-computed FIRE number; fallback to our own calc
+  const fireUSD = (fireRaw&&toN(fireRaw)>0) ? toN(fireRaw) : targetPI*12*25;
+
+  if(targetPI===0) warnings.push('Target!C6 = 0 atau kosong. Kalkulasi FIRE mungkin tidak akurat.');
+
+  return {fuel,parts,targetPI,fireUSD,allocTotal,warnings};
+}
+
+// ── PROCESS FILE ─────────────────────────────────────────────────
+function processFile(file){
+  clearErr();
+  startLoader(file.name);
+  const reader=new FileReader();
+  reader.onload=e=>{
+    setTimeout(()=>{
+      try{
+        const wb=XLSX.read(e.target.result,{
+          type:'array',
+          cellNF:true,      // preserve number formats
+          cellFormula:true, // keep formula strings
+          cellDates:true,
+        });
+        const parsed=parseExcel(wb);
+        S.data={...parsed,fileName:file.name};
+        finishLoader(()=>renderDash());
+      }catch(err){
+        endLoader();
+        showErr(err.message||'Gagal membaca file. Gunakan template GreatVoyage_Premium_v1.xlsx.');
       }
-    };
-    reader.readAsArrayBuffer(file);
-  }, []);
-
-  const handleDrop = useCallback((e) => {
-    e.preventDefault();
-    setDragging(false);
-    const file = e.dataTransfer.files[0];
-    if (file) parseFile(file);
-  }, [parseFile]);
-
-  const handleFileChange = (e) => {
-    const file = e.target.files[0];
-    if (file) parseFile(file);
+    },200);
   };
+  reader.readAsArrayBuffer(file);
+}
 
-  // ── EMPTY STATE ─────────────────────────────────────────────────────────────
-  if (!data) {
-    return (
-      <div style={{
-        minHeight: "100vh", background: NAVY,
-        fontFamily: "'Georgia', 'Times New Roman', serif",
-        display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
-        padding: "40px 20px", position: "relative", overflow: "hidden"
-      }}>
-        {/* Background decoration */}
-        <div style={{
-          position: "absolute", inset: 0, opacity: 0.04,
-          backgroundImage: `radial-gradient(circle at 20% 50%, ${GOLD} 0%, transparent 50%),
-                            radial-gradient(circle at 80% 20%, ${TEAL} 0%, transparent 40%)`,
-          pointerEvents: "none"
-        }} />
+// ── CALCULATION ENGINE (Inflation-Adjusted FIRE) ─────────────────
+function compute(data, inflation){
+  const {fuel:f,parts,targetPI}=data;
+  const annualFuel=(f.gaji*f.bulan_on)-(f.biaya_laut*f.bulan_on)-(f.biaya_darat*f.bulan_off);
+  const cPerYr=12/Math.max(f.bulan_on+f.bulan_off,1);
+  const wr=parts.reduce((a,p)=>a+(p.alloc/100)*(p.ret/100),0); // weighted return
+  const realRet=(1+wr)/(1+inflation)-1;
+  // Inflation-adjusted FIRE capital (sustainable withdrawal at real rate)
+  const fireAdj=realRet>0.001 ? targetPI*12*(1/realRet) : targetPI*12*25;
 
-        {/* Compass decoration */}
-        <div style={{ fontSize: 56, marginBottom: 8, filter: `drop-shadow(0 0 20px ${GOLD}60)` }}>🧭</div>
-
-        <h1 style={{
-          fontFamily: "'Playfair Display', 'Georgia', serif",
-          color: GOLD_LIGHT, fontSize: "clamp(28px, 5vw, 48px)",
-          textAlign: "center", margin: "0 0 8px",
-          textShadow: `0 0 40px ${GOLD}50`, letterSpacing: "0.05em"
-        }}>
-          The Great Voyage
-        </h1>
-        <p style={{ color: "#7A9AB5", fontSize: 15, textAlign: "center", marginBottom: 48, maxWidth: 420, lineHeight: 1.7 }}>
-          Navigasi menuju kebebasan finansial. Upload Logbook Excel-mu untuk memulai pelayaran.
-        </p>
-
-        {/* Drop Zone */}
-        <div
-          onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
-          onDragLeave={() => setDragging(false)}
-          onDrop={handleDrop}
-          onClick={() => fileRef.current?.click()}
-          style={{
-            width: "100%", maxWidth: 420, border: `2px dashed ${dragging ? GOLD : "#2A4A6B"}`,
-            borderRadius: 16, padding: "48px 32px", textAlign: "center", cursor: "pointer",
-            background: dragging ? `${GOLD}08` : `${NAVY2}80`,
-            transition: "all 0.3s ease",
-            boxShadow: dragging ? `0 0 40px ${GOLD}30` : "none"
-          }}
-        >
-          <Upload size={36} color={dragging ? GOLD : "#4A7A9B"} style={{ marginBottom: 16, display: "block", margin: "0 auto 16px" }} />
-          <p style={{ color: dragging ? GOLD_LIGHT : "#7A9AB5", fontSize: 15, margin: 0 }}>
-            {dragging ? "Lepaskan untuk upload..." : "Drag & drop file Excel di sini, atau klik untuk memilih"}
-          </p>
-          <p style={{ color: "#3A6A8A", fontSize: 12, marginTop: 8 }}>Mendukung: .xlsx, .xls</p>
-        </div>
-        <input ref={fileRef} type="file" accept=".xlsx,.xls" onChange={handleFileChange} style={{ display: "none" }} />
-
-        {/* Error */}
-        {error && (
-          <div style={{
-            marginTop: 20, padding: "14px 20px", borderRadius: 10,
-            background: `${RED}15`, border: `1px solid ${RED}50`,
-            display: "flex", alignItems: "flex-start", gap: 10, maxWidth: 420, width: "100%"
-          }}>
-            <AlertTriangle size={18} color={RED} style={{ flexShrink: 0, marginTop: 2 }} />
-            <p style={{ color: "#FCA5A5", fontSize: 13, margin: 0, lineHeight: 1.6 }}>{error}</p>
-          </div>
-        )}
-
-        {/* Download Template */}
-        <button
-          onClick={downloadTemplate}
-          style={{
-            marginTop: 28, display: "flex", alignItems: "center", gap: 8,
-            background: "transparent", border: `1px solid ${GOLD}60`,
-            color: GOLD, padding: "12px 24px", borderRadius: 8, cursor: "pointer",
-            fontSize: 14, fontFamily: "inherit", transition: "all 0.2s",
-            letterSpacing: "0.05em"
-          }}
-          onMouseEnter={e => { e.currentTarget.style.background = `${GOLD}15`; e.currentTarget.style.borderColor = GOLD; }}
-          onMouseLeave={e => { e.currentTarget.style.background = "transparent"; e.currentTarget.style.borderColor = `${GOLD}60`; }}
-        >
-          <Download size={16} />
-          Download Template Logbook
-        </button>
-      </div>
-    );
+  // 30-year projection
+  let portfolio=0,sal=0;
+  const proj=[];
+  for(let y=1;y<=30;y++){
+    portfolio=(portfolio+annualFuel)*(1+wr);
+    sal+=annualFuel;
+    proj.push({year:y,inv:Math.round(portfolio),sal:Math.round(sal),fire:Math.round(fireAdj)});
   }
 
-  // ── DASHBOARD STATE ─────────────────────────────────────────────────────────
-  const {
-    annualFuel, annualSaving, weightedReturn, fireCapital,
-    projectionData, contractCount, yearsToFIRE,
-    parts, targetPI, on, off, gaji
-  } = data;
+  // Contracts to FIRE
+  let accum=0,cnt=0;
+  while(accum<fireAdj&&cnt<2000){
+    accum=(accum+annualFuel/cPerYr)*(1+wr/cPerYr);
+    cnt++;
+  }
+  const fireYear=proj.findIndex(p=>p.inv>=fireAdj);
 
-  const fireYear = projectionData.findIndex(d => d.Investasi >= fireCapital);
-  const fireReached = fireYear >= 0;
-
-  const getColor = (idx) => {
-    const colors = [GOLD, TEAL, "#A78BFA", "#F472B6", GREEN];
-    return colors[idx % colors.length];
-  };
-
-  return (
-    <div style={{
-      minHeight: "100vh", background: NAVY,
-      fontFamily: "'Georgia', 'Times New Roman', serif",
-      color: "#C8D8E8", padding: "24px 16px"
-    }}>
-      {/* ── HEADER */}
-      <div style={{ textAlign: "center", marginBottom: 32, position: "relative" }}>
-        <p style={{ color: "#4A7A9B", fontSize: 12, letterSpacing: "0.2em", marginBottom: 4, textTransform: "uppercase" }}>
-          Logbook: {fileName}
-        </p>
-        <h1 style={{
-          fontFamily: "'Playfair Display', 'Georgia', serif",
-          color: GOLD_LIGHT, fontSize: "clamp(22px, 4vw, 36px)",
-          margin: 0, textShadow: `0 0 30px ${GOLD}40`
-        }}>
-          ⚓ The Great Voyage
-        </h1>
-        <button
-          onClick={() => { setData(null); setError(null); setFileName(null); }}
-          style={{
-            position: "absolute", right: 0, top: "50%", transform: "translateY(-50%)",
-            background: "transparent", border: `1px solid #2A4A6B`,
-            color: "#4A7A9B", padding: "6px 14px", borderRadius: 6,
-            cursor: "pointer", fontSize: 12, fontFamily: "inherit"
-          }}
-        >
-          Ganti File
-        </button>
-      </div>
-
-      <div style={{ maxWidth: 960, margin: "0 auto" }}>
-
-        {/* ── ROW 1: VESSEL + STATUS */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 20, marginBottom: 20 }}>
-
-          {/* Vessel Visual */}
-          <div style={{
-            background: `${NAVY2}CC`, border: `1px solid ${GOLD}25`,
-            borderRadius: 16, padding: "24px 16px", display: "flex",
-            flexDirection: "column", alignItems: "center"
-          }}>
-            <p style={{ color: GOLD, fontSize: 12, letterSpacing: "0.15em", textTransform: "uppercase", marginBottom: 12, margin: "0 0 12px" }}>
-              Armada Investasi
-            </p>
-            <VesselSVG parts={parts} />
-            <div style={{ width: "100%", marginTop: 16, display: "flex", flexDirection: "column", gap: 6 }}>
-              {parts.map((p, i) => (
-                <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                    <div style={{ width: 10, height: 10, borderRadius: "50%", background: getColor(i), boxShadow: `0 0 6px ${getColor(i)}` }} />
-                    <span style={{ fontSize: 12, color: "#8AAABF" }}>{p.Nama_Aset}</span>
-                  </div>
-                  <span style={{ fontSize: 12, color: getColor(i), fontFamily: "monospace" }}>
-                    {p.Alokasi_Persen}% @ {p.Return_Persen}%
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Status Panel */}
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            {/* FIRE Status */}
-            <div style={{
-              background: fireReached ? `${GREEN}10` : `${GOLD}08`,
-              border: `1px solid ${fireReached ? GREEN : GOLD}40`,
-              borderRadius: 14, padding: "18px 20px", flex: 1
-            }}>
-              <p style={{ color: "#6A9AB5", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.15em", margin: "0 0 6px" }}>
-                Sisa Perjalanan
-              </p>
-              <p style={{
-                fontFamily: "'Playfair Display', serif",
-                color: fireReached ? GREEN : GOLD_LIGHT,
-                fontSize: "clamp(24px, 4vw, 36px)", margin: "0 0 4px",
-                textShadow: `0 0 20px ${fireReached ? GREEN : GOLD}50`
-              }}>
-                {contractCount} Kontrak
-              </p>
-              <p style={{ color: "#6A9AB5", fontSize: 13, margin: 0 }}>
-                ≈ {yearsToFIRE.toFixed(1)} tahun menuju FIRE
-              </p>
-            </div>
-
-            {/* Key Metrics */}
-            {[
-              { label: "Annual Fuel (Tabungan/Thn)", value: `$${annualFuel.toLocaleString()}`, color: GOLD },
-              { label: "Modal FIRE (Target × 25)", value: `$${fireCapital.toLocaleString()}`, color: TEAL },
-              { label: "Weighted Return", value: `${(weightedReturn * 100).toFixed(2)}%`, color: "#A78BFA" },
-              { label: "Target Passive Income/Bln", value: `$${targetPI.toLocaleString()}`, color: GREEN },
-            ].map((m, i) => (
-              <div key={i} style={{
-                background: `${NAVY2}CC`, border: `1px solid #1A3A5A`,
-                borderRadius: 10, padding: "12px 16px",
-                display: "flex", justifyContent: "space-between", alignItems: "center"
-              }}>
-                <span style={{ fontSize: 12, color: "#6A9AB5" }}>{m.label}</span>
-                <span style={{ fontFamily: "monospace", fontWeight: "bold", color: m.color, fontSize: 15 }}>{m.value}</span>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        {/* ── ROW 2: CONTRACT STATS */}
-        <div style={{
-          display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 14, marginBottom: 20
-        }}>
-          {[
-            { icon: "⚡", label: "Bulan On-Board", value: `${on} bln`, sub: "per kontrak" },
-            { icon: "🏠", label: "Bulan Off-Board", value: `${off} bln`, sub: "per kontrak" },
-            { icon: "💰", label: "Gaji Laut/Bln", value: `$${Number(gaji).toLocaleString()}`, sub: "gross" },
-          ].map((s, i) => (
-            <div key={i} style={{
-              background: `${NAVY2}CC`, border: `1px solid ${GOLD}20`,
-              borderRadius: 12, padding: "16px", textAlign: "center"
-            }}>
-              <div style={{ fontSize: 22, marginBottom: 8 }}>{s.icon}</div>
-              <p style={{ color: "#6A9AB5", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", margin: "0 0 4px" }}>{s.label}</p>
-              <p style={{ fontFamily: "monospace", color: GOLD_LIGHT, fontSize: 20, margin: "0 0 2px", fontWeight: "bold" }}>{s.value}</p>
-              <p style={{ color: "#4A6A7A", fontSize: 11, margin: 0 }}>{s.sub}</p>
-            </div>
-          ))}
-        </div>
-
-        {/* ── ROW 3: PROJECTION CHART */}
-        <div style={{
-          background: `${NAVY2}CC`, border: `1px solid ${GOLD}25`,
-          borderRadius: 16, padding: "24px 16px 16px", marginBottom: 20
-        }}>
-          <p style={{ color: GOLD, fontSize: 12, letterSpacing: "0.15em", textTransform: "uppercase", margin: "0 0 20px", paddingLeft: 8 }}>
-            Proyeksi Pelayaran — Jalur Investasi vs Gaji Saja
-          </p>
-          <ResponsiveContainer width="100%" height={260}>
-            <AreaChart data={projectionData.filter((_, i) => i % 2 === 0 || i === projectionData.length - 1)} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-              <defs>
-                <linearGradient id="gradInv" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={GOLD} stopOpacity={0.3} />
-                  <stop offset="95%" stopColor={GOLD} stopOpacity={0} />
-                </linearGradient>
-                <linearGradient id="gradSal" x1="0" y1="0" x2="0" y2="1">
-                  <stop offset="5%" stopColor={TEAL} stopOpacity={0.2} />
-                  <stop offset="95%" stopColor={TEAL} stopOpacity={0} />
-                </linearGradient>
-              </defs>
-              <CartesianGrid strokeDasharray="3 3" stroke="#1A3A5A" />
-              <XAxis dataKey="year" tick={{ fill: "#4A7A9B", fontSize: 11 }} axisLine={false} tickLine={false} />
-              <YAxis tick={{ fill: "#4A7A9B", fontSize: 10 }} axisLine={false} tickLine={false}
-                tickFormatter={v => v >= 1000000 ? `$${(v / 1000000).toFixed(1)}M` : `$${(v / 1000).toFixed(0)}K`} />
-              <Tooltip content={<CustomTooltip />} />
-              <Legend wrapperStyle={{ color: "#8AAABF", fontSize: 12 }} />
-              <Area type="monotone" dataKey="GajiSaja" name="Jalur Gaji Saja" stroke={TEAL} fill="url(#gradSal)" strokeWidth={2} dot={false} strokeDasharray="5 3" />
-              <Area type="monotone" dataKey="Investasi" name="Jalur Investasi" stroke={GOLD} fill="url(#gradInv)" strokeWidth={2.5} dot={false} />
-              {fireReached && (
-                <Area type="monotone" dataKey="FIRE" name="Target FIRE" stroke={RED} fill="none" strokeWidth={1.5} strokeDasharray="4 4" dot={false} />
-              )}
-            </AreaChart>
-          </ResponsiveContainer>
-          {fireReached && (
-            <p style={{ textAlign: "center", color: GREEN, fontSize: 13, marginTop: 12, fontFamily: "inherit" }}>
-              🎯 FIRE tercapai di sekitar <b>Tahun {fireYear + 1}</b> dengan jalur investasi
-            </p>
-          )}
-        </div>
-
-        {/* ── ROW 4: ASSET ALLOCATION TABLE */}
-        <div style={{
-          background: `${NAVY2}CC`, border: `1px solid ${GOLD}25`,
-          borderRadius: 16, padding: "20px"
-        }}>
-          <p style={{ color: GOLD, fontSize: 12, letterSpacing: "0.15em", textTransform: "uppercase", margin: "0 0 16px" }}>
-            Manifest Aset — Vessel Parts
-          </p>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
-            <thead>
-              <tr>
-                {["Nama Aset", "Alokasi", "Return/Thn", "Annual Fuel → Aset"].map(h => (
-                  <th key={h} style={{ textAlign: "left", color: "#4A7A9B", fontWeight: "normal", paddingBottom: 10, fontSize: 11, textTransform: "uppercase", letterSpacing: "0.1em", borderBottom: `1px solid #1A3A5A` }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {parts.map((p, i) => {
-                const allocated = annualSaving * (p.Alokasi_Persen / 100);
-                return (
-                  <tr key={i} style={{ borderBottom: `1px solid #1A3A5A22` }}>
-                    <td style={{ padding: "10px 0", display: "flex", alignItems: "center", gap: 8 }}>
-                      <div style={{ width: 8, height: 8, borderRadius: "50%", background: getColor(i), flexShrink: 0 }} />
-                      <span style={{ color: "#C8D8E8" }}>{p.Nama_Aset}</span>
-                    </td>
-                    <td style={{ color: getColor(i), fontFamily: "monospace" }}>{p.Alokasi_Persen}%</td>
-                    <td style={{ color: "#8AAABF", fontFamily: "monospace" }}>{p.Return_Persen}%</td>
-                    <td style={{ color: GOLD_LIGHT, fontFamily: "monospace" }}>${allocated.toLocaleString(undefined, { maximumFractionDigits: 0 })}/thn</td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-
-        {/* Footer */}
-        <p style={{ textAlign: "center", color: "#2A4A6A", fontSize: 11, marginTop: 24, letterSpacing: "0.1em" }}>
-          THE GREAT VOYAGE · SEAFARER WEALTH NAVIGATOR · DATA DRIVEN BY YOUR LOGBOOK
-        </p>
-      </div>
-    </div>
-  );
+  return{...f,annualFuel,wr,realRet,fireAdj,proj,cnt,yrs:cnt/cPerYr,parts,targetPI,cPerYr,fireYear,inflation};
 }
+
+// ── FORMAT HELPERS ───────────────────────────────────────────────
+function fmtL(usd){
+  const {currency:c,rate}=S;
+  if(c==='USD') return `$${Math.round(usd).toLocaleString('en-US')}`;
+  const v=Math.round(usd*rate);
+  if(c==='IDR') return `Rp ${v.toLocaleString('id-ID')}`;
+  if(c==='PHP') return `₱ ${v.toLocaleString('en-PH')}`;
+  return `${LOCALE[c].sym}${v.toLocaleString()}`;
+}
+const fmtU=v=>`$${Math.round(v).toLocaleString('en-US')}`;
+const set=(id,txt)=>{const el=document.getElementById(id);if(el)el.textContent=txt;};
+const setH=(id,html)=>{const el=document.getElementById(id);if(el)el.innerHTML=html;};
+
+// ── RENDER DASHBOARD ─────────────────────────────────────────────
+function renderDash(){
+  const data=S.data;
+  const L=LOCALE[S.currency];
+  const c=compute(data,S.inflation);
+  S.computed=c;
+
+  // Allocation warning
+  const hasWarn=data.warnings&&data.warnings.length>0;
+  const allocWarnEl=document.getElementById('alloc-warn');
+  const allocChip=document.getElementById('db-alloc-chip');
+  if(hasWarn){
+    set('alloc-warn-msg',data.warnings.join(' | '));
+    allocWarnEl.classList.add('on');
+    allocChip.classList.remove('hide');
+  }else{
+    allocWarnEl.classList.remove('on');
+    allocChip.classList.add('hide');
+  }
+
+  // Topbar
+  set('db-file',`📄 ${data.fileName}`);
+  setH('db-cur-chip',`${L.flag} ${L.sym} · ${L.lang}`);
+  set('db-inf-chip',`Inflation ${(S.inflation*100).toFixed(1)}%`);
+
+  // FIRE hero
+  set('db-contracts',L.fireCon(c.cnt));
+  set('db-years',L.fireYrs(c.yrs));
+  setH('db-fire-badge',c.fireYear>=0?`<div class="fire-badge">${L.fireBadge(c.fireYear+1)}</div>`:'');
+  const infNote=document.getElementById('db-inf-note');
+  if(S.inflation>0){infNote.textContent=L.infNote;infNote.style.display='block';}else{infNote.style.display='none';}
+
+  // Metric values
+  setH('db-fuel',`${fmtL(c.annualFuel)}<span class="m-sub">${fmtU(c.annualFuel)} USD</span>`);
+  setH('db-fire',`${fmtL(c.fireAdj)}<span class="m-sub">${fmtU(c.fireAdj)} · inflation-adj</span>`);
+  set('db-wr',`${(c.wr*100).toFixed(2)}%`);
+  setH('db-target',`${fmtL(c.targetPI)}<span class="m-sub">${fmtU(c.targetPI)} USD</span>`);
+
+  // Stat cards
+  set('db-on',`${c.bulan_on} mo`);
+  set('db-off',`${c.bulan_off} mo`);
+  set('db-gaji',fmtU(c.gaji));
+
+  // Vessel SVG colors
+  ['v-hull','v-hull2'].forEach(id=>{const el=document.getElementById(id);if(el)el.setAttribute('fill',COLORS[1]);});
+  ['v-engine','v-engine2','v-s1','v-s2','v-s3'].forEach(id=>{const el=document.getElementById(id);if(el)el.setAttribute('fill',COLORS[0]);});
+  document.getElementById('v-life').setAttribute('stroke',COLORS[2]);
+
+  // Asset legend
+  setH('asset-legend',c.parts.map((p,i)=>`
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:7px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="a-dot" style="background:${COLORS[i%6]};box-shadow:0 0 6px ${COLORS[i%6]}"></span>
+        <span style="font-size:12px;color:var(--muted)">${p.name}</span>
+      </div>
+      <span style="font-family:'JetBrains Mono',monospace;font-size:11px;color:${COLORS[i%6]}">${p.alloc}% @ ${p.ret}%</span>
+    </div>`).join(''));
+
+  // Chart
+  buildChart(c);
+
+  // Analytics
+  buildAnalytics(c);
+
+  // Asset table
+  setH('asset-tbody',c.parts.map((p,i)=>{
+    const ann=c.annualFuel*(p.alloc/100);
+    return`<tr>
+      <td><span class="a-dot" style="background:${COLORS[i%6]};box-shadow:0 0 5px ${COLORS[i%6]}"></span><span style="color:var(--parchment)">${p.name}</span></td>
+      <td style="font-family:'JetBrains Mono',monospace;color:${COLORS[i%6]}">${p.alloc}%</td>
+      <td style="font-family:'JetBrains Mono',monospace;color:var(--muted)">${p.ret}%</td>
+      <td style="font-family:'JetBrains Mono',monospace;color:var(--gold-pale)">${fmtU(ann)}</td>
+      <td style="font-family:'JetBrains Mono',monospace;color:var(--teal);font-size:12px">${fmtL(ann)}</td>
+    </tr>`;
+  }).join(''));
+
+  // Show dashboard
+  document.getElementById('upload-page').classList.add('hide');
+  const db=document.getElementById('dashboard');
+  db.style.display='block';db.classList.add('on');
+
+  // Build detail modal
+  buildDetail(c);
+}
+
+// ── CHART ────────────────────────────────────────────────────────
+function buildChart(c){
+  if(S.chartInst){S.chartInst.destroy();S.chartInst=null;}
+  const ctx=document.getElementById('voyage-chart').getContext('2d');
+  const pts=c.proj.filter((_,i)=>i%2===0||i===29);
+  S.chartInst=new Chart(ctx,{
+    type:'line',
+    data:{
+      labels:pts.map(p=>`Y${p.year}`),
+      datasets:[
+        {label:'Investment Path',data:pts.map(p=>p.inv),borderColor:'#FFD700',backgroundColor:'rgba(255,215,0,.1)',borderWidth:2.5,fill:true,tension:.4,pointRadius:0},
+        {label:'Salary Only',data:pts.map(p=>p.sal),borderColor:'#00C8B4',backgroundColor:'rgba(0,200,180,.06)',borderWidth:2,borderDash:[6,4],fill:true,tension:.4,pointRadius:0},
+        {label:'FIRE Target (adj)',data:pts.map(()=>c.fireAdj),borderColor:'#FF1744',backgroundColor:'transparent',borderWidth:1.5,borderDash:[4,4],fill:false,tension:0,pointRadius:0},
+      ]
+    },
+    options:{
+      responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{labels:{color:'#8090B0',font:{family:"'Crimson Text',Georgia,serif",size:12},boxWidth:18,padding:14}},
+        tooltip:{backgroundColor:'#00003A',borderColor:'rgba(255,215,0,.35)',borderWidth:1,titleColor:'#FFD700',bodyColor:'#F5F0E8',titleFont:{family:"'Cinzel',serif",size:12},callbacks:{label:ctx=>`${ctx.dataset.label}: $${ctx.parsed.y.toLocaleString()}`}}
+      },
+      scales:{
+        x:{grid:{color:'rgba(0,0,90,.8)'},ticks:{color:'#405060',font:{size:10}}},
+        y:{grid:{color:'rgba(0,0,90,.6)'},ticks:{color:'#405060',font:{size:10},callback:v=>v>=1e6?`$${(v/1e6).toFixed(1)}M`:`$${(v/1e3).toFixed(0)}K`}}
+      }
+    }
+  });
+  const note=document.getElementById('chart-note');
+  if(c.fireYear>=0){note.textContent=`🎯 FIRE reached around Year ${c.fireYear+1} on the investment path`;note.style.display='block';}
+  else note.style.display='none';
+}
+
+// ── ANALYTICS PANEL ──────────────────────────────────────────────
+function buildAnalytics(c){
+  // Fuel formula
+  const data=S.data;
+  setH('formula-fuel',
+`<span class="f-cmt">// COORDINATE MAP — GreatVoyage_Premium_v1.xlsx</span>
+Fueling!C7 → Bulan_On    = <span class="f-res">${c.bulan_on}</span>
+Fueling!D7 → Bulan_Off   = <span class="f-res">${c.bulan_off}</span>
+Fueling!E7 → Gaji_Laut   = <span class="f-res">$${c.gaji}</span>
+Fueling!F7 → Biaya_Laut  = <span class="f-res">$${data.fuel.biaya_laut}</span>
+Fueling!G7 → Biaya_Darat = <span class="f-res">$${data.fuel.biaya_darat}</span>
+
+<span class="f-cmt">// FORMULA: Annual Fuel = (Gaji × On) − (BiayaL × On) − (BiayaD × Off)</span>
+= ($${c.gaji} × ${c.bulan_on}) − ($${data.fuel.biaya_laut} × ${c.bulan_on}) − ($${data.fuel.biaya_darat} × ${c.bulan_off})
+<span class="f-res">= $${Math.round(c.annualFuel).toLocaleString()} / year  (${fmtL(c.annualFuel)} local)</span>`);
+
+  // Weighted return
+  setH('formula-wr',
+`<span class="f-cmt">// VesselParts: scanned rows 7–20, cols C/D/E</span>
+${c.parts.map((p,i)=>`C${7+i}:E${7+i} → ${p.name}: ${p.alloc}% × ${p.ret}% = <span class="f-res">${(p.alloc/100*p.ret/100*100).toFixed(4)}%</span>`).join('\n')}
+
+Weighted Return = SUMPRODUCT(alloc, return) / 10000
+<span class="f-res">= ${(c.wr*100).toFixed(4)}%</span>
+Real Return (inflation-adj) = <span class="f-res">${(c.realRet*100).toFixed(4)}%</span>`);
+
+  // WR table
+  setH('wr-tbody',c.parts.map((p,i)=>{
+    const contrib=(p.alloc/100)*(p.ret/100)*100;
+    return`<tr>
+      <td><span class="a-dot" style="background:${COLORS[i%6]}"></span>${p.name}</td>
+      <td style="color:${COLORS[i%6]}">${p.alloc}%</td>
+      <td style="color:var(--teal)">${p.ret}%</td>
+      <td style="color:var(--gold)">${contrib.toFixed(4)}%</td>
+    </tr>`;
+  }).join(''));
+
+  // Year table
+  S.yrExpanded=false;
+  renderYrTable(c);
+}
+
+function renderYrTable(c){
+  const L=LOCALE[S.currency];
+  const rows=S.yrExpanded?c.proj:c.proj.slice(0,10);
+  setH('yr-tbody',rows.map(p=>{
+    const gap=Math.max(0,p.fire-p.inv);
+    const done=p.inv>=p.fire;
+    return`<tr>
+      <td style="color:var(--muted)">${p.year}</td>
+      <td>$${p.sal.toLocaleString()}</td>
+      <td style="color:${done?'var(--green)':'var(--gold-pale)'};font-weight:${done?700:400}">$${p.inv.toLocaleString()}</td>
+      <td style="color:${done?'var(--green)':'var(--red)'}">$${gap.toLocaleString()}</td>
+      <td class="${done?'yr-fire':''}">${done?'🎯 FIRE!':'⛵'}</td>
+    </tr>`;
+  }).join(''));
+  set('show-more-btn',S.yrExpanded?L.showLess:L.showMore);
+}
+
+function toggleYrTable(){S.yrExpanded=!S.yrExpanded;renderYrTable(S.computed);}
+function toggleAccord(){
+  const b=document.getElementById('accord-body');
+  const t=document.getElementById('accord-tog');
+  b.classList.toggle('open');t.classList.toggle('open');
+}
+
+// ── DETAIL MODAL ─────────────────────────────────────────────────
+function buildDetail(c){
+  const data=S.data;
+  setH('detail-body',`
+    <div style="display:flex;flex-direction:column;gap:16px">
+      <div style="background:rgba(0,0,30,.8);border:1px solid var(--border);border-left:3px solid var(--gold);border-radius:var(--r-sm);padding:16px">
+        <div class="accord-title">⛽ Annual Fuel Breakdown</div>
+        <div class="formula-box">
+Gaji × On        = $${c.gaji} × ${c.bulan_on} = <span class="f-res">$${(c.gaji*c.bulan_on).toLocaleString()}</span>
+Biaya Laut × On  = $${data.fuel.biaya_laut} × ${c.bulan_on} = <span style="color:var(--red)">−$${(data.fuel.biaya_laut*c.bulan_on).toLocaleString()}</span>
+Biaya Darat × Off= $${data.fuel.biaya_darat} × ${c.bulan_off} = <span style="color:var(--red)">−$${(data.fuel.biaya_darat*c.bulan_off).toLocaleString()}</span>
+                   ─────────────────────────────────
+Annual Fuel      = <span class="f-res">$${Math.round(c.annualFuel).toLocaleString()}  (${fmtL(c.annualFuel)})</span></div>
+      </div>
+      <div style="background:rgba(0,0,30,.8);border:1px solid var(--border);border-left:3px solid var(--teal);border-radius:var(--r-sm);padding:16px">
+        <div class="accord-title">🎯 FIRE Capital — Coordinate Read</div>
+        <div class="formula-box">
+Target!C6  → Target_PI = <span class="f-res">$${c.targetPI}/month</span>
+Target!C12 → FIRE (Excel formula) = <span class="f-res">$${Math.round(data.fireUSD).toLocaleString()}</span>
+
+Inflation Rate : <span class="f-res">${(c.inflation*100).toFixed(1)}%</span>
+Real Return    : <span class="f-res">${(c.realRet*100).toFixed(3)}%</span>
+Adj FIRE Cap   : <span class="f-res">$${Math.round(c.fireAdj).toLocaleString()}  (${fmtL(c.fireAdj)})</span>
+Exchange Rate  : <span class="f-res">${S.rate.toLocaleString()} ${LOCALE[S.currency].sym}/USD</span></div>
+      </div>
+      <div style="background:rgba(0,0,30,.8);border:1px solid var(--border);border-left:3px solid var(--green);border-radius:var(--r-sm);padding:16px">
+        <div class="accord-title">🧭 Voyage Countdown</div>
+        <div class="formula-box">
+Contracts/Year  : <span class="f-res">${c.cPerYr.toFixed(2)}</span>
+Weighted Return : <span class="f-res">${(c.wr*100).toFixed(3)}%</span>
+Years to FIRE   : <span class="f-res">${c.yrs.toFixed(1)}</span>
+Contracts Left  : <span class="f-res">${c.cnt}</span></div>
+      </div>
+    </div>`);
+}
+
+// ── INFLATION SLIDER ─────────────────────────────────────────────
+function onInflation(val){
+  S.inflation=parseFloat(val)/100;
+  set('inf-display',`${parseFloat(val).toFixed(1)}%`);
+  set('db-inf-chip',`Inflation ${parseFloat(val).toFixed(1)}%`);
+  if(S.data) renderDash();
+}
+
+// ── MODALS ───────────────────────────────────────────────────────
+function openModal(id){document.getElementById(id).classList.add('open');}
+function closeModal(id){document.getElementById(id).classList.remove('open');}
+
+// ── LOADER ───────────────────────────────────────────────────────
+let _lt=null;
+function startLoader(fname){
+  const L=LOCALE[S.currency];
+  set('ld-title',L.ldTitle);
+  set('ld-step','');
+  document.getElementById('ld-bar').style.width='0%';
+  document.getElementById('loader').classList.add('on');
+  let i=0;
+  _lt=setInterval(()=>{
+    if(i<L.ldSteps.length){
+      set('ld-step',L.ldSteps[i]);
+      document.getElementById('ld-bar').style.width=`${((i+1)/L.ldSteps.length)*90}%`;
+      i++;
+    }
+  },440);
+}
+function endLoader(){clearInterval(_lt);document.getElementById('loader').classList.remove('on');}
+function finishLoader(cb){document.getElementById('ld-bar').style.width='100%';clearInterval(_lt);setTimeout(()=>{endLoader();cb();},550);}
+
+// ── DYNAMIC TEMPLATE DOWNLOAD ────────────────────────────────────
+// Generates an Excel file whose data sits at the EXACT coordinates
+// the parser reads — compatible out of the box with GreatVoyage_Premium_v1 layout.
+function dlTemplate(){
+  const wb=XLSX.utils.book_new();
+
+  // Fueling: data at row 7 (0-indexed = row 6 in aoa)
+  const fuelAOA=Array(7).fill(null).map(()=>Array(8).fill(''));
+  fuelAOA[0][0]='⚓ THE GREAT VOYAGE — FUELING SHEET';
+  fuelAOA[5][1]='Bulan_On'; fuelAOA[5][2]='Bulan_Off'; fuelAOA[5][3]='Gaji_Laut'; fuelAOA[5][4]='Biaya_Laut'; fuelAOA[5][5]='Biaya_Darat';
+  fuelAOA[6][2]=8; fuelAOA[6][3]=4; fuelAOA[6][4]=3000; fuelAOA[6][5]=500; fuelAOA[6][6]=800;
+  // ↑ Row index 6 = Excel row 7 (1-indexed) — matches parser coordinates C7:G7
+
+  // VesselParts: data at rows 7–10 (0-indexed 6–9)
+  const partsAOA=Array(11).fill(null).map(()=>Array(6).fill(''));
+  partsAOA[0][0]='🚢 THE GREAT VOYAGE — VESSEL PARTS';
+  partsAOA[5][2]='Nama_Aset'; partsAOA[5][3]='Alokasi_Persen'; partsAOA[5][4]='Return_Persen';
+  const assets=[['Saham Dividen',40,8],['Obligasi/Sukuk',30,6],['REITs',20,7],['Deposito',10,5]];
+  assets.forEach(([nm,al,ret],i)=>{partsAOA[6+i][2]=nm;partsAOA[6+i][3]=al;partsAOA[6+i][4]=ret;});
+  // ↑ Rows 6–9 = Excel rows 7–10 — matches parser scan C7:E10
+
+  // Target: data at C6=row6(idx5), C12=row12(idx11)
+  const targetAOA=Array(13).fill(null).map(()=>Array(4).fill(''));
+  targetAOA[0][0]='🎯 THE GREAT VOYAGE — TARGET SHEET';
+  targetAOA[4][1]='Target_Passive_Income';
+  targetAOA[5][2]=700;       // C6 — monthly target
+  targetAOA[10][1]='Modal FIRE (4% Rule)';
+  // C12 formula: =C6*12*25 — xlsx will write it as a formula
+  targetAOA[11][2]={f:'C6*12*25',v:700*12*25};
+  // ↑ Rows idx 5 = Excel row 6, idx 11 = Excel row 12
+
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(fuelAOA),'Fueling');
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(partsAOA),'VesselParts');
+  XLSX.utils.book_append_sheet(wb,XLSX.utils.aoa_to_sheet(targetAOA),'Target');
+  XLSX.writeFile(wb,`GreatVoyage_Universal_${S.currency}.xlsx`);
+}
+
+// ── INIT ─────────────────────────────────────────────────────────
+document.getElementById('inf-slider').value=4;
+document.getElementById('rate-panel').style.display=''; // IDR default
+// PWA
+if('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(()=>{});
+</script>
+</body>
+</html>
